@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../src/lib/supabase";
 
 export default function Page() {
   const [campanha, setCampanha] = useState(null);
+  const [clube, setClube] = useState(null);
   const [sabores, setSabores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
-  const [enviado, setEnviado] = useState(false);
+
+  const [enviando, setEnviando] = useState(false);
+  const [pedidoCriado, setPedidoCriado] = useState(null);
 
   const [form, setForm] = useState({
     nome_comprador: "",
@@ -25,92 +28,178 @@ export default function Page() {
 
   async function carregarDados() {
     setLoading(true);
+    setErro(null);
 
-    const { data: campanhaData } = await supabase
+    const { data: campanhaData, error: campanhaError } = await supabase
       .from("campanhas")
-      .select("id, nome, valor_pizza")
+      .select(
+        `
+        id,
+        clube_id,
+        nome,
+        valor_pizza,
+        data_inicio,
+        data_fim,
+        identificador_centavos,
+        clubes (
+          id,
+          nome,
+          chave_pix
+        )
+      `
+      )
       .eq("ativa", true)
+      .order("data_inicio", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
+
+    if (campanhaError) {
+      console.error(campanhaError);
+      setErro("Erro ao carregar campanha.");
+      setLoading(false);
+      return;
+    }
 
     if (!campanhaData) {
-      setErro("Nenhuma campanha ativa encontrada");
+      setErro("Nenhuma campanha ativa encontrada.");
       setLoading(false);
       return;
     }
 
     setCampanha(campanhaData);
+    setClube(campanhaData.clubes || null);
 
-    const { data: saboresData } = await supabase
+    const { data: saboresData, error: saboresError } = await supabase
       .from("sabores")
       .select("id, nome")
       .eq("campanha_id", campanhaData.id)
       .eq("ativo", true)
       .order("ordem");
 
+    if (saboresError) {
+      console.error(saboresError);
+      setErro("Erro ao carregar sabores.");
+      setLoading(false);
+      return;
+    }
+
     setSabores(saboresData || []);
     setLoading(false);
   }
 
   function handleChange(e) {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value, type } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "number" ? Number(value) : value,
+    }));
   }
 
-  function alterarSabor(id, quantidade) {
-    setSaboresSelecionados({
-      ...saboresSelecionados,
-      [id]: Number(quantidade),
+  function incSabor(id) {
+    setSaboresSelecionados((prev) => ({
+      ...prev,
+      [id]: (prev[id] || 0) + 1,
+    }));
+  }
+
+  function decSabor(id) {
+    setSaboresSelecionados((prev) => {
+      const atual = prev[id] || 0;
+      const novo = Math.max(0, atual - 1);
+      return { ...prev, [id]: novo };
     });
   }
 
-  function totalSabores() {
-    return Object.values(saboresSelecionados).reduce(
-      (total, q) => total + q,
-      0
-    );
-  }
+  const totalSabores = useMemo(() => {
+    return Object.values(saboresSelecionados).reduce((t, q) => t + q, 0);
+  }, [saboresSelecionados]);
+
+  const identificadorCentavos = useMemo(() => {
+    if (!campanha) return 0;
+    const v = Number(campanha.identificador_centavos || 0);
+    return Number.isFinite(v) ? v : 0;
+  }, [campanha]);
+
+  const valorBase = useMemo(() => {
+    if (!campanha) return 0;
+    return Number(form.quantidade) * Number(campanha.valor_pizza);
+  }, [form.quantidade, campanha]);
+
+  // ✅ total final = base + identificador (ex.: +0,01)
+  const valorTotal = useMemo(() => {
+    return Number((valorBase + identificadorCentavos).toFixed(2));
+  }, [valorBase, identificadorCentavos]);
+
+  const resumoItens = useMemo(() => {
+    const mapa = new Map(sabores.map((s) => [s.id, s.nome]));
+    return Object.entries(saboresSelecionados)
+      .filter(([_, qtd]) => Number(qtd) > 0)
+      .map(([saborId, qtd]) => ({
+        sabor_id: saborId,
+        nome: mapa.get(saborId) || "Sabor",
+        quantidade: Number(qtd),
+      }));
+  }, [sabores, saboresSelecionados]);
+
+  const progresso = useMemo(() => {
+    const q = Math.max(1, Number(form.quantidade) || 1);
+    return Math.min(100, Math.round((totalSabores / q) * 100));
+  }, [totalSabores, form.quantidade]);
 
   async function enviarPedido(e) {
     e.preventDefault();
+    setErro(null);
 
-    if (totalSabores() !== Number(form.quantidade)) {
+    if (!campanha) return;
+
+    if (!form.nome_comprador || !form.telefone || !form.nome_desbravador) {
+      alert("Preencha nome, telefone e nome do desbravador.");
+      return;
+    }
+
+    if (Number(form.quantidade) < 1) {
+      alert("Quantidade deve ser no mínimo 1.");
+      return;
+    }
+
+    if (totalSabores !== Number(form.quantidade)) {
       alert("A soma dos sabores deve ser igual à quantidade de pizzas.");
       return;
     }
 
-    const valorTotal =
-      Number(form.quantidade) * Number(campanha.valor_pizza);
-
-    // 1️⃣ Criar pedido
-const { data: pedido, error } = await supabase
-  .from("pedidos")
-  .insert({
-    campanha_id: campanha.id,
-    nome_comprador,
-    telefone,
-    nome_desbravador,
-    quantidade,
-    valor_total,
-    status: "aguardando_pagamento"
-  })
-  .select()
-  .single();
-
-
-    if (pedidoError) {
-      console.error(pedidoError);
-      alert("Erro ao criar pedido");
+    if (resumoItens.length === 0) {
+      alert("Selecione pelo menos um sabor.");
       return;
     }
 
-    // 2️⃣ Criar pedido_sabores
-    const inserts = Object.entries(saboresSelecionados).map(
-      ([sabor_id, quantidade]) => ({
-        pedido_id: pedido.id,
-        sabor_id,
-        quantidade,
+    setEnviando(true);
+
+    const { data: pedido, error: pedidoError } = await supabase
+      .from("pedidos")
+      .insert({
+        campanha_id: campanha.id,
+        nome_comprador: form.nome_comprador.trim(),
+        telefone: form.telefone.trim(),
+        nome_desbravador: form.nome_desbravador.trim(),
+        quantidade: Number(form.quantidade),
+        valor_total: valorTotal, // ✅ com identificador
+        status: "aguardando_pagamento",
       })
-    );
+      .select("id, codigo_pedido, valor_total, status, criado_em")
+      .single();
+
+    if (pedidoError) {
+      console.error(pedidoError);
+      setEnviando(false);
+      alert("Erro ao criar pedido (RLS).");
+      return;
+    }
+
+    const inserts = resumoItens.map((i) => ({
+      pedido_id: pedido.id,
+      sabor_id: i.sabor_id,
+      quantidade: i.quantidade,
+    }));
 
     const { error: saboresError } = await supabase
       .from("pedido_sabores")
@@ -118,96 +207,641 @@ const { data: pedido, error } = await supabase
 
     if (saboresError) {
       console.error(saboresError);
-      alert("Erro ao salvar sabores");
+      setEnviando(false);
+      alert("Pedido criado, mas deu erro ao salvar sabores (RLS).");
       return;
     }
 
-    setEnviado(true);
+    setPedidoCriado({
+      pedido,
+      itens: resumoItens,
+      valorBase,
+      identificadorCentavos,
+    });
+    setEnviando(false);
   }
 
-  if (loading) return <p>Carregando...</p>;
-  if (erro) return <p>{erro}</p>;
+  function resetar() {
+    setPedidoCriado(null);
+    setSaboresSelecionados({});
+    setForm({
+      nome_comprador: "",
+      telefone: "",
+      nome_desbravador: "",
+      quantidade: 1,
+    });
+  }
 
-  if (enviado) {
+  // =========================
+  // PIX (copia e cola + QR) - IGUAL AO MODELO QUE FUNCIONOU
+  // 59=N, 60=C, TXID=PizzaAmigosParaiso, sem 010211, GUI BR.GOV.BCB.PIX
+  // =========================
+  const pixCopiaECola = useMemo(() => {
+    if (!pedidoCriado?.pedido) return "";
+
+    const chave = (clube?.chave_pix || "").trim();
+    if (!chave) return "";
+
+    const merchantName = "N";
+    const merchantCity = "C";
+    const txid = "PizzaAmigosParaiso";
+
+    return buildPixPayloadLikeWorkingExample({
+      pixKey: chave,
+      merchantName,
+      merchantCity,
+      amount: Number(pedidoCriado.pedido.valor_total || 0),
+      txid,
+    });
+  }, [pedidoCriado, clube]);
+
+  const qrUrl = useMemo(() => {
+    if (!pixCopiaECola) return "";
+    return `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(
+      pixCopiaECola
+    )}`;
+  }, [pixCopiaECola]);
+
+  async function copiarPix() {
+    try {
+      await navigator.clipboard.writeText(pixCopiaECola);
+      alert("PIX copiado ✅");
+    } catch {
+      alert("Não consegui copiar automaticamente. Selecione e copie manualmente.");
+    }
+  }
+
+  if (loading) {
     return (
-      <main style={{ padding: 20 }}>
-        <h2>Pedido registrado com sucesso 🍕</h2>
-        <p>Pedido pronto para pagamento.</p>
-      </main>
+      <>
+        <div className="bg">
+          <div className="shell">
+            <div className="card">
+              <div className="brand">
+                <div className="logo">🍕</div>
+                <div>
+                  <h1>Desbrava Pizza</h1>
+                  <p>Carregando campanha…</p>
+                </div>
+              </div>
+              <div className="skeleton" />
+              <div className="skeleton" />
+              <div className="skeleton" />
+            </div>
+          </div>
+        </div>
+        <Style />
+      </>
+    );
+  }
+
+  if (erro) {
+    return (
+      <>
+        <div className="bg">
+          <div className="shell">
+            <div className="card">
+              <div className="alert">
+                <strong>Ops!</strong> {erro}
+              </div>
+              <button className="btn" onClick={carregarDados}>
+                Tentar novamente
+              </button>
+            </div>
+          </div>
+        </div>
+        <Style />
+      </>
+    );
+  }
+
+  if (pedidoCriado) {
+    return (
+      <>
+        <div className="bg">
+          <div className="shell">
+            <div className="card">
+              <div className="brand">
+                <div className="logo ok">✅</div>
+                <div>
+                  <h1>Pedido confirmado</h1>
+                  <p>Guarde este código para localizar seu pedido.</p>
+                </div>
+              </div>
+
+              <div className="codeBox">
+                <div className="codeLabel">NÚMERO DO PEDIDO</div>
+                <div className="codeValue">{pedidoCriado.pedido.codigo_pedido || "DP-—"}</div>
+              </div>
+
+              <div className="row">
+                <div className="pill warn">Aguardando pagamento</div>
+                <div className="price">
+                  Total: <strong>R$ {Number(pedidoCriado.pedido.valor_total).toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div className="miniBreakdown">
+                <div className="miniRow">
+                  <span>
+                    Base ({form.quantidade} x R$ {Number(campanha.valor_pizza).toFixed(2)})
+                  </span>
+                  <strong>R$ {Number(pedidoCriado.valorBase).toFixed(2)}</strong>
+                </div>
+                <div className="miniRow">
+                  <span>Identificador (centavos)</span>
+                  <strong>+ R$ {Number(pedidoCriado.identificadorCentavos).toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div className="sectionTitle">Resumo</div>
+              <div className="list">
+                {pedidoCriado.itens.map((i) => (
+                  <div key={i.sabor_id} className="item">
+                    <span className="itemName">{i.nome}</span>
+                    <span className="itemQty">x{i.quantidade}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="sectionTitle">Pagamento via PIX</div>
+
+              {!clube?.chave_pix ? (
+                <div className="alert">
+                  <strong>Chave PIX do clube não encontrada.</strong> Cadastre em{" "}
+                  <code>clubes.chave_pix</code>.
+                </div>
+              ) : !pixCopiaECola ? (
+                <div className="alert">Não foi possível gerar o PIX. Verifique a chave do clube.</div>
+              ) : (
+                <div className="pixBox">
+                  <div className="pixGrid">
+                    <div className="qrWrap">
+                      <img className="qr" src={qrUrl} alt="QR Code PIX" />
+                      <div className="pixHint">Aponte a câmera/PIX do banco para pagar.</div>
+                    </div>
+
+                    <div>
+                      <div className="pixTitle">PIX Copia e Cola</div>
+                      <textarea className="pixText" readOnly value={pixCopiaECola} />
+                      <div className="pixActions">
+                        <button type="button" className="btnLight" onClick={copiarPix}>
+                          Copiar
+                        </button>
+                        <div className="pixSmall">Pagamento será identificado pelo valor com centavos.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="hint">
+                Se precisar localizar depois, informe o código{" "}
+                <strong>{pedidoCriado.pedido.codigo_pedido}</strong>.
+              </div>
+
+              <button className="btn" onClick={resetar}>
+                Fazer novo pedido
+              </button>
+            </div>
+          </div>
+        </div>
+        <Style />
+      </>
     );
   }
 
   return (
-    <main style={{ padding: 20 }}>
-      <h1>🍕 Desbrava Pizza</h1>
-      <h2>{campanha.nome}</h2>
+    <>
+      <div className="bg">
+        <div className="shell">
+          <div className="card">
+            <div className="brand">
+              <div className="logo">🍕</div>
+              <div>
+                <h1>Desbrava Pizza</h1>
+                <p className="sub">
+                  {campanha.nome} • R$ {Number(campanha.valor_pizza).toFixed(2)} / pizza
+                </p>
+              </div>
+              <div className="tag">Amigos do Paraíso</div>
+            </div>
 
-      <p>
-        Valor da pizza: R$ {Number(campanha.valor_pizza).toFixed(2)}
-      </p>
+            <form onSubmit={enviarPedido}>
+              <div className="grid2">
+                <div>
+                  <label>Nome do comprador</label>
+                  <input
+                    name="nome_comprador"
+                    value={form.nome_comprador}
+                    onChange={handleChange}
+                    placeholder="Ex: Jefferson Santos"
+                    required
+                  />
+                </div>
 
-      <hr />
+                <div>
+                  <label>Telefone</label>
+                  <input
+                    name="telefone"
+                    value={form.telefone}
+                    onChange={handleChange}
+                    placeholder="(11) 99999-9999"
+                    required
+                  />
+                </div>
 
-      <h3>Dados do pedido</h3>
+                <div className="span2">
+                  <label>Nome do desbravador</label>
+                  <input
+                    name="nome_desbravador"
+                    value={form.nome_desbravador}
+                    onChange={handleChange}
+                    placeholder="Ex: João / Unidade Águia"
+                    required
+                  />
+                </div>
 
-      <form onSubmit={enviarPedido}>
-        <input
-          name="nome_comprador"
-          placeholder="Nome do comprador"
-          required
-          onChange={handleChange}
-        />
-        <br /><br />
+                <div className="span2">
+                  <label>Quantidade de pizzas</label>
+                  <div className="qtyRow">
+                    <input
+                      type="number"
+                      name="quantidade"
+                      min="1"
+                      value={form.quantidade}
+                      onChange={handleChange}
+                    />
+                    <div className="totals">
+                      <div className="small">
+                        Selecionado: <strong>{totalSabores}</strong> / {form.quantidade}
+                      </div>
+                      <div className="bar">
+                        <div
+                          className={`barFill ${progresso === 100 ? "done" : ""}`}
+                          style={{ width: `${progresso}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-        <input
-          name="telefone"
-          placeholder="Telefone"
-          required
-          onChange={handleChange}
-        />
-        <br /><br />
+              <div className="sectionTitle">Escolha os sabores</div>
+              <div className="flavors">
+                {sabores.map((s) => {
+                  const qtd = saboresSelecionados[s.id] || 0;
+                  return (
+                    <div key={s.id} className="flavorCard">
+                      <div className="flavorName">{s.nome}</div>
+                      <div className="stepper">
+                        <button type="button" className="iconBtn" onClick={() => decSabor(s.id)}>
+                          –
+                        </button>
+                        <div className="qtd">{qtd}</div>
+                        <button type="button" className="iconBtn" onClick={() => incSabor(s.id)}>
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-        <input
-          name="nome_desbravador"
-          placeholder="Nome do desbravador"
-          required
-          onChange={handleChange}
-        />
-        <br /><br />
+              <div className="footer">
+                <div className="summary">
+                  <div className="small">Total a pagar</div>
+                  <div className="big">R$ {Number(valorTotal).toFixed(2)}</div>
+                  <div className="small muted">
+                    Base: R$ {Number(valorBase).toFixed(2)}
+                    {identificadorCentavos
+                      ? ` + Identificador: R$ ${Number(identificadorCentavos).toFixed(2)}`
+                      : ""}
+                  </div>
+                </div>
 
-        <input
-          type="number"
-          name="quantidade"
-          min="1"
-          value={form.quantidade}
-          onChange={handleChange}
-        />
-        <br /><br />
+                <button className="btn" type="submit" disabled={enviando}>
+                  {enviando ? "Enviando..." : "Confirmar pedido"}
+                </button>
+              </div>
+            </form>
 
-        <h3>Escolha os sabores</h3>
-
-        {sabores.map((sabor) => (
-          <div key={sabor.id}>
-            {sabor.nome}:
-            <input
-              type="number"
-              min="0"
-              value={saboresSelecionados[sabor.id] || 0}
-              onChange={(e) =>
-                alterarSabor(sabor.id, e.target.value)
-              }
-            />
+            <div className="note">
+              Ao confirmar, seu pedido será registrado e você receberá as instruções de pagamento PIX.
+            </div>
           </div>
-        ))}
+        </div>
+      </div>
+      <Style />
+    </>
+  );
+}
 
-        <p>
-          Total selecionado: {totalSabores()} / {form.quantidade}
-        </p>
+/* =========================================================
+   PIX payload (IGUAL AO EXEMPLO QUE FUNCIONOU)
+   ========================================================= */
 
-        <br />
+function buildPixPayloadLikeWorkingExample({ pixKey, merchantName, merchantCity, amount, txid }) {
+  const key = String(pixKey || "").trim();
+  if (!key) return "";
 
-        <button type="submit">Confirmar pedido</button>
-      </form>
-    </main>
+  const mai = emv("00", "BR.GOV.BCB.PIX") + emv("01", key);
+
+  const payload =
+    emv("00", "01") +
+    emv("26", mai) +
+    emv("52", "0000") +
+    emv("53", "986") +
+    emv("54", formatAmount(amount)) +
+    emv("58", "BR") +
+    emv("59", String(merchantName || "N").slice(0, 25)) +
+    emv("60", String(merchantCity || "C").slice(0, 15)) +
+    emv("62", emv("05", String(txid || "PizzaAmigosParaiso").slice(0, 25))) +
+    "6304";
+
+  const crc = crc16_ccitt_false(payload);
+  return payload + crc;
+}
+
+function emv(id, value) {
+  const v = String(value ?? "");
+  const len = v.length.toString().padStart(2, "0");
+  return `${id}${len}${v}`;
+}
+
+function formatAmount(n) {
+  const v = Number(n || 0);
+  return v.toFixed(2);
+}
+
+function crc16_ccitt_false(str) {
+  let crc = 0xffff;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if (crc & 0x8000) crc = (crc << 1) ^ 0x1021;
+      else crc <<= 1;
+      crc &= 0xffff;
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, "0");
+}
+
+/* =========================================================
+   Styles
+   ========================================================= */
+
+function Style() {
+  return (
+    <style jsx global>{`
+      :root {
+        --card: rgba(255, 255, 255, 0.92);
+        --text: #0f172a;
+        --muted: #475569;
+        --line: rgba(15, 23, 42, 0.12);
+        --primary: #2563eb;
+        --primary2: #1d4ed8;
+        --warn: #f59e0b;
+        --ok: #16a34a;
+        --ok2: #22c55e;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: var(--text); }
+
+      .bg {
+        min-height: 100vh;
+        background: radial-gradient(1200px 600px at 20% 10%, rgba(37, 99, 235, 0.45), transparent 60%),
+                    radial-gradient(1000px 500px at 90% 30%, rgba(245, 158, 11, 0.35), transparent 60%),
+                    linear-gradient(180deg, #0b1220, #0f172a 60%, #0b1220);
+        padding: 28px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .shell { width: 100%; max-width: 920px; }
+      .card {
+        width: 100%;
+        background: var(--card);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 18px;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+        padding: 22px;
+        backdrop-filter: blur(10px);
+      }
+
+      .brand { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+      .logo {
+        width: 44px; height: 44px; border-radius: 14px;
+        background: rgba(37, 99, 235, 0.14);
+        display:grid; place-items:center; font-size:22px;
+      }
+      .logo.ok { background: rgba(34, 197, 94, 0.16); }
+
+      h1 { margin: 0; font-size: 22px; }
+      .sub { margin: 2px 0 0 0; color: var(--muted); font-size: 14px; }
+      .tag {
+        margin-left:auto; font-size:12px; color:#0f172a;
+        background: rgba(245,158,11,0.18);
+        border: 1px solid rgba(245,158,11,0.35);
+        padding: 6px 10px; border-radius:999px; white-space:nowrap;
+      }
+
+      label { display:block; font-size:12px; color:var(--muted); margin:6px 0; }
+      input, textarea {
+        width:100%;
+        border:1px solid var(--line);
+        background: rgba(255,255,255,0.9);
+        border-radius:12px;
+        padding:12px;
+        font-size:14px;
+        outline:none;
+        color:#0f172a;
+        -webkit-text-fill-color:#0f172a;
+        caret-color:#0f172a;
+      }
+      input:focus, textarea:focus {
+        border-color: rgba(37,99,235,0.55);
+        box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+      }
+
+      .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+      .span2 { grid-column: span 2; }
+
+      .qtyRow { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }
+      .totals .small { font-size:12px; color:var(--muted); margin-bottom:6px; }
+      .bar { height:10px; background: rgba(15,23,42,0.08); border-radius:999px; overflow:hidden; }
+      .barFill { height:100%; background: linear-gradient(90deg, var(--primary), #60a5fa); border-radius:999px; }
+      .barFill.done { background: linear-gradient(90deg, var(--ok), var(--ok2)); }
+
+      .sectionTitle { margin-top:18px; margin-bottom:10px; font-weight:900; font-size:14px; }
+
+      .flavors { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+      .flavorCard {
+        border:1px solid var(--line); background: rgba(255,255,255,0.8);
+        border-radius:14px; padding:12px;
+        display:flex; align-items:center; justify-content:space-between; gap:10px;
+      }
+      .flavorName { font-size:13px; font-weight:800; }
+      .stepper { display:flex; align-items:center; gap:8px; }
+      .iconBtn {
+        width:32px; height:32px; border-radius:10px;
+        border:1px solid var(--line); background:white; cursor:pointer;
+        font-size:18px; line-height:0;
+        color:#0f172a; -webkit-text-fill-color:#0f172a;
+      }
+      .qtd { width:24px; text-align:center; font-weight:900; }
+
+      .footer {
+        margin-top:16px; display:flex; justify-content:space-between; gap:12px; align-items:center;
+        border-top:1px dashed rgba(15,23,42,0.18); padding-top:14px;
+      }
+      .summary .small { font-size:12px; color:var(--muted); }
+      .summary .big { font-size:20px; font-weight:900; }
+      .muted { color: var(--muted); }
+
+      .btn {
+        background: linear-gradient(180deg, var(--primary), var(--primary2));
+        color:white; border:none; padding:12px 14px; border-radius:12px;
+        font-weight:900; cursor:pointer; min-width:220px;
+      }
+      .btn:disabled { opacity:0.65; cursor:not-allowed; }
+      .btnLight {
+        background: rgba(15,23,42,0.06);
+        color: #0f172a;
+        border: 1px solid rgba(15,23,42,0.12);
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .note {
+        margin-top:14px; font-size:12px; color:var(--muted);
+        background: rgba(15,23,42,0.04);
+        border:1px solid rgba(15,23,42,0.08);
+        padding:10px 12px; border-radius:12px;
+      }
+
+      .alert {
+        background: rgba(245, 158, 11, 0.16);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 12px;
+        font-size: 13px;
+      }
+
+      .codeBox {
+        background: rgba(37, 99, 235, 0.10);
+        border: 1px solid rgba(37, 99, 235, 0.22);
+        border-radius: 14px;
+        padding: 12px;
+        margin: 14px 0;
+      }
+      .codeLabel { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); }
+      .codeValue { font-size: 26px; font-weight: 900; margin-top: 4px; }
+
+      .row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+      .pill {
+        font-size:12px; border-radius:999px; padding:6px 10px;
+        border:1px solid rgba(15,23,42,0.12);
+        background: rgba(15,23,42,0.05);
+      }
+      .pill.warn { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.16); }
+      .price { font-size:13px; color:var(--muted); }
+
+      .miniBreakdown {
+        margin: 8px 0 12px 0;
+        border: 1px solid rgba(15,23,42,0.10);
+        background: rgba(255,255,255,0.70);
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      .miniRow {
+        display:flex; align-items:center; justify-content:space-between; gap:10px;
+        font-size: 12px; color: var(--muted);
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(15,23,42,0.08);
+      }
+      .miniRow:last-child { border-bottom: none; }
+
+      .list {
+        border:1px solid var(--line);
+        background: rgba(255,255,255,0.75);
+        border-radius:14px;
+        padding:10px;
+      }
+      .item {
+        display:flex; justify-content:space-between;
+        padding:8px 6px;
+        border-bottom:1px solid rgba(15,23,42,0.08);
+      }
+      .item:last-child { border-bottom:none; }
+      .itemName { font-weight:800; }
+      .itemQty { color:var(--muted); font-weight:900; }
+
+      .hint {
+        margin-top:12px; font-size:12px; color:var(--muted);
+        background: rgba(34, 197, 94, 0.10);
+        border: 1px solid rgba(34, 197, 94, 0.22);
+        padding: 10px 12px;
+        border-radius: 12px;
+      }
+
+      /* PIX */
+      .pixBox {
+        border: 1px solid rgba(15,23,42,0.10);
+        background: rgba(255,255,255,0.72);
+        border-radius: 16px;
+        padding: 12px;
+      }
+      .pixGrid {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .qrWrap {
+        border: 1px solid rgba(15,23,42,0.10);
+        border-radius: 14px;
+        background: white;
+        padding: 10px;
+        display: grid;
+        place-items: center;
+      }
+      .qr { width: 260px; height: 260px; }
+      .pixHint { margin-top: 8px; font-size: 12px; color: var(--muted); text-align: center; }
+      .pixTitle { font-weight: 900; margin-bottom: 8px; }
+      .pixText {
+        min-height: 120px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+      }
+      .pixActions { margin-top: 10px; display:flex; gap: 10px; align-items:center; justify-content: space-between; }
+      .pixSmall { font-size: 12px; color: var(--muted); }
+
+      .skeleton {
+        height:14px; border-radius:10px;
+        background: linear-gradient(90deg, rgba(15,23,42,0.08), rgba(15,23,42,0.14), rgba(15,23,42,0.08));
+        background-size:200% 100%;
+        animation: shimmer 1.2s infinite;
+        margin-top:10px;
+      }
+      @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+      @media (max-width: 820px) {
+        .flavors { grid-template-columns: repeat(2, 1fr); }
+        .pixGrid { grid-template-columns: 1fr; }
+        .qr { width: 240px; height: 240px; }
+      }
+      @media (max-width: 520px) {
+        .grid2 { grid-template-columns: 1fr; }
+        .span2 { grid-column: span 1; }
+        .qtyRow { grid-template-columns: 1fr; }
+        .btn { min-width: 100%; }
+        .flavors { grid-template-columns: 1fr; }
+        .tag { display: none; }
+      }
+    `}</style>
   );
 }
