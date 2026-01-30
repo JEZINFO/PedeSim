@@ -20,6 +20,7 @@ export default function AdminClubes() {
     tipo_chave_pix: "email",
     chave_pix: "",
     banco_pix: "",
+    identificador_pix: "", // ✅ NOVO
     ativo: true,
   });
 
@@ -44,7 +45,7 @@ export default function AdminClubes() {
 
     const { data, error } = await supabase
       .from("clubes")
-      .select("id, nome, tipo_chave_pix, chave_pix, banco_pix, ativo, criado_em")
+      .select("id, nome, tipo_chave_pix, chave_pix, banco_pix, identificador_pix, ativo, criado_em") // ✅ NOVO
       .order("criado_em", { ascending: false });
 
     if (error) {
@@ -67,6 +68,7 @@ export default function AdminClubes() {
       tipo_chave_pix: "email",
       chave_pix: "",
       banco_pix: "",
+      identificador_pix: "", // ✅ NOVO
       ativo: true,
     });
   }
@@ -80,12 +82,21 @@ export default function AdminClubes() {
       tipo_chave_pix: c.tipo_chave_pix || "email",
       chave_pix: c.chave_pix || "",
       banco_pix: c.banco_pix || "",
+      identificador_pix: c.identificador_pix || "", // ✅ NOVO
       ativo: !!c.ativo,
     });
   }
 
   function onChange(e) {
     const { name, value, type, checked } = e.target;
+
+    // ✅ Identificador PIX: não permitir espaços
+    if (name === "identificador_pix") {
+      const semEspaco = String(value || "").replace(/\s+/g, "");
+      setForm((p) => ({ ...p, identificador_pix: semEspaco }));
+      return;
+    }
+
     setForm((p) => ({
       ...p,
       [name]: type === "checkbox" ? checked : value,
@@ -103,11 +114,21 @@ export default function AdminClubes() {
     if (!nome) return setErro("Informe o nome do clube.");
     if (!chave) return setErro("Informe a chave PIX.");
 
+    const identificadorPix = String(form.identificador_pix || "")
+      .replace(/\s+/g, "")
+      .trim();
+
+    // ✅ se vier preenchido, valida (sem espaço e tamanho <= 25 pro TXID)
+    if (identificadorPix && identificadorPix.length > 25) {
+      return setErro("Identificador PIX deve ter no máximo 25 caracteres (regra do TXID).");
+    }
+
     const payload = {
       nome,
       tipo_chave_pix: form.tipo_chave_pix || null,
       chave_pix: chave,
       banco_pix: String(form.banco_pix || "").trim() || null,
+      identificador_pix: identificadorPix || null, // ✅ NOVO
       ativo: !!form.ativo,
     };
 
@@ -177,7 +198,7 @@ export default function AdminClubes() {
           <div className="top">
             <div>
               <h1>Cadastro de Clubes</h1>
-              <p className="muted">Mantenha os dados do clube e a chave PIX</p>
+              <p className="muted">Mantenha os dados do clube, chave PIX e o TXID (identificador PIX)</p>
             </div>
 
             <div className="topRight">
@@ -222,6 +243,12 @@ export default function AdminClubes() {
                               • <span className="muted2">{c.banco_pix}</span>
                             </>
                           ) : null}
+                        </div>
+
+                        {/* ✅ NOVO: Identificador PIX */}
+                        <div className="rowSub" style={{ marginTop: 6 }}>
+                          TXID (Identificador PIX):{" "}
+                          <strong className="mono">{c.identificador_pix || "PizzaAmigosParaiso (padrão)"}</strong>
                         </div>
                       </div>
 
@@ -271,10 +298,33 @@ export default function AdminClubes() {
                 </div>
 
                 <label>Chave PIX</label>
-                <input name="chave_pix" value={form.chave_pix} onChange={onChange} placeholder="Ex: email@dominio.com" />
+                <input
+                  name="chave_pix"
+                  value={form.chave_pix}
+                  onChange={onChange}
+                  placeholder="Ex: email@dominio.com"
+                />
 
                 <label>Banco/observação (opcional)</label>
-                <input name="banco_pix" value={form.banco_pix} onChange={onChange} placeholder="Ex: Conta Igreja / Banco X" />
+                <input
+                  name="banco_pix"
+                  value={form.banco_pix}
+                  onChange={onChange}
+                  placeholder="Ex: Conta Igreja / Banco X"
+                />
+
+                {/* ✅ NOVO: Identificador PIX (TXID) */}
+                <label>Identificador PIX (TXID) — sem espaço</label>
+                <input
+                  name="identificador_pix"
+                  value={form.identificador_pix}
+                  onChange={onChange}
+                  placeholder="Ex: PizzaAmigosParaiso"
+                />
+                <div className="note" style={{ marginTop: 0 }}>
+                  Regras: <strong>sem espaço</strong> e até <strong>25 caracteres</strong>. Se ficar vazio, usamos{" "}
+                  <strong>PizzaAmigosParaiso</strong>.
+                </div>
 
                 <button className="btn" type="submit">
                   Salvar

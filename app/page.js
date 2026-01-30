@@ -44,7 +44,8 @@ export default function Page() {
         clubes (
           id,
           nome,
-          chave_pix
+          chave_pix,
+          identificador_pix
         )
       `
       )
@@ -201,9 +202,7 @@ export default function Page() {
       quantidade: i.quantidade,
     }));
 
-    const { error: saboresError } = await supabase
-      .from("pedido_sabores")
-      .insert(inserts);
+    const { error: saboresError } = await supabase.from("pedido_sabores").insert(inserts);
 
     if (saboresError) {
       console.error(saboresError);
@@ -234,8 +233,15 @@ export default function Page() {
 
   // =========================
   // PIX (copia e cola + QR) - IGUAL AO MODELO QUE FUNCIONOU
-  // 59=N, 60=C, TXID=PizzaAmigosParaiso, sem 010211, GUI BR.GOV.BCB.PIX
+  // 59=N, 60=C, sem 010211, GUI BR.GOV.BCB.PIX
+  // TXID agora vem do clube.identificador_pix (sem espaço)
   // =========================
+  const txidExibicao = useMemo(() => {
+    const txidDoClube = String(clube?.identificador_pix || "").trim();
+    const txidSemEspaco = txidDoClube.replace(/\s+/g, "");
+    return txidSemEspaco || "PizzaAmigosParaiso";
+  }, [clube]);
+
   const pixCopiaECola = useMemo(() => {
     if (!pedidoCriado?.pedido) return "";
 
@@ -244,16 +250,15 @@ export default function Page() {
 
     const merchantName = "N";
     const merchantCity = "C";
-    const txid = "PizzaAmigosParaiso";
 
     return buildPixPayloadLikeWorkingExample({
       pixKey: chave,
       merchantName,
       merchantCity,
       amount: Number(pedidoCriado.pedido.valor_total || 0),
-      txid,
+      txid: txidExibicao,
     });
-  }, [pedidoCriado, clube]);
+  }, [pedidoCriado, clube, txidExibicao]);
 
   const qrUrl = useMemo(() => {
     if (!pixCopiaECola) return "";
@@ -388,7 +393,11 @@ export default function Page() {
                         <button type="button" className="btnLight" onClick={copiarPix}>
                           Copiar
                         </button>
-                        <div className="pixSmall">Pagamento será identificado pelo valor com centavos.</div>
+                        <div className="pixSmall">
+                          Pagamento será identificado pelo valor com centavos.
+                          <br />
+                          TXID (Identificador PIX): <strong className="mono">{txidExibicao}</strong>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -556,7 +565,7 @@ function buildPixPayloadLikeWorkingExample({ pixKey, merchantName, merchantCity,
     emv("58", "BR") +
     emv("59", String(merchantName || "N").slice(0, 25)) +
     emv("60", String(merchantCity || "C").slice(0, 15)) +
-    emv("62", emv("05", String(txid || "PizzaAmigosParaiso").slice(0, 25))) +
+    emv("62", emv("05", String(txid || "PizzaAmigosParaiso").replace(/\s+/g, "").slice(0, 25))) +
     "6304";
 
   const crc = crc16_ccitt_false(payload);
