@@ -23,6 +23,29 @@ export default function AdminPedidos() {
   const [itensPorPedido, setItensPorPedido] = useState({}); // { pedido_id: [{nome, quantidade}] }
   const [detalhe, setDetalhe] = useState(null);
 
+  // =========================
+  // Formatação de telefone (WhatsApp)
+  // - no banco: somente dígitos
+  // - no admin: exibir com máscara BR
+  // =========================
+  function sanitizePhoneDigits(v) {
+    return String(v ?? "")
+      .replace(/\D/g, "")
+      .slice(0, 11);
+  }
+
+  function formatBRPhone(digits) {
+    const d = sanitizePhoneDigits(digits);
+    if (!d) return "";
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+
+    if (d.length < 3) return `(${ddd}`;
+    if (rest.length <= 4) return `(${ddd}) ${rest}`;
+    if (rest.length <= 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+    return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+  }
+
   useEffect(() => {
     (async () => {
       setErro(null);
@@ -419,7 +442,7 @@ export default function AdminPedidos() {
                           <StatusPill status={p.status} />
                         </div>
                         <div className="rowSub">
-                          <strong>{p.nome_comprador}</strong> • {p.telefone} • Desbravador: {p.nome_desbravador}
+                          <strong>{sanitizeOnlyLetters(p.nome_comprador)}</strong> • {formatBRPhone(p.telefone) || "—"} • Desbravador: {sanitizeOnlyLetters(p.nome_desbravador)}
                         </div>
                         <div className="rowSub">
                           {itens.length > 0 ? (
@@ -452,7 +475,7 @@ export default function AdminPedidos() {
                       <StatusPill status={detalhe.status} />
                     </div>
                     <div className="modalSub">
-                      {detalhe.nome_comprador} • {detalhe.telefone} • Desbravador: {detalhe.nome_desbravador}
+                      {sanitizeOnlyLetters(detalhe.nome_comprador)} • {formatBRPhone(detalhe.telefone) || "—"} • Desbravador: {sanitizeOnlyLetters(detalhe.nome_desbravador)}
                     </div>
                   </div>
                   <button className="btnMini" onClick={() => setDetalhe(null)} type="button">
@@ -511,6 +534,14 @@ export default function AdminPedidos() {
       <Style />
     </>
   );
+}
+
+function sanitizeOnlyLetters(v) {
+  const raw = String(v ?? "").normalize("NFKC");
+  return raw
+    .replace(/[^\p{L} ]+/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function StatusPill({ status }) {

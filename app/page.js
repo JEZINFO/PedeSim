@@ -22,6 +22,37 @@ export default function Page() {
 
   const [saboresSelecionados, setSaboresSelecionados] = useState({});
 
+  // =========================
+  // Sanitização de campos (pedido)
+  // - Nome: apenas letras/números/espaço (unicode)
+  // - WhatsApp: apenas números + máscara BR
+  // =========================
+  function sanitizeName(v) {
+    const raw = String(v ?? "").normalize("NFKC");
+    return raw
+      .replace(/[^\p{L} ]+/gu, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/^\s+/g, "");
+  }
+
+  function sanitizePhoneDigits(v) {
+    return String(v ?? "")
+      .replace(/\D/g, "")
+      .slice(0, 11); // BR: 10 ou 11 dígitos (com DDD)
+  }
+
+  function formatBRPhone(digits) {
+    const d = sanitizePhoneDigits(digits);
+    if (!d) return "";
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+
+    if (d.length < 3) return `(${ddd}`;
+    if (rest.length <= 4) return `(${ddd}) ${rest}`;
+    if (rest.length <= 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+    return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+  }
+
   useEffect(() => {
     carregarDados();
   }, []);
@@ -90,10 +121,24 @@ export default function Page() {
 
   function handleChange(e) {
     const { name, value, type } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === "number" ? Number(value) : value,
-    }));
+    setForm((prev) => {
+      // números
+      if (type === "number") {
+        return { ...prev, [name]: Number(value) };
+      }
+
+      // WhatsApp (telefone): somente dígitos
+      if (name === "telefone") {
+        return { ...prev, [name]: sanitizePhoneDigits(value) };
+      }
+
+      // nomes: apenas alfanumérico (unicode) + espaço
+      if (name === "nome_comprador" || name === "nome_desbravador") {
+        return { ...prev, [name]: sanitizeName(value) };
+      }
+
+      return { ...prev, [name]: value };
+    });
   }
 
   function incSabor(id) {
@@ -153,8 +198,13 @@ export default function Page() {
 
     if (!campanha) return;
 
-    if (!form.nome_comprador || !form.telefone || !form.nome_desbravador) {
-      alert("Preencha nome, telefone e nome do desbravador.");
+    if (!form.nome_comprador?.trim() || !form.telefone?.trim() || !form.nome_desbravador?.trim()) {
+      alert("Preencha nome, WhatsApp e nome do desbravador.");
+      return;
+    }
+
+    if (form.telefone.length < 10) {
+      alert("Informe um WhatsApp válido com DDD (10 ou 11 dígitos).");
       return;
     }
 
@@ -180,7 +230,7 @@ export default function Page() {
       .insert({
         campanha_id: campanha.id,
         nome_comprador: form.nome_comprador.trim(),
-        telefone: form.telefone.trim(),
+        telefone: form.telefone.trim(), // somente números
         nome_desbravador: form.nome_desbravador.trim(),
         quantidade: Number(form.quantidade),
         valor_total: valorTotal, // ✅ com identificador
@@ -445,17 +495,23 @@ export default function Page() {
                     value={form.nome_comprador}
                     onChange={handleChange}
                     placeholder="Ex: Jefferson Santos"
+                    inputMode="text"
+                    autoComplete="name"
                     required
                   />
                 </div>
 
                 <div>
-                  <label>Telefone</label>
+                  <label>WhatsApp (telefone)</label>
                   <input
+                    type="tel"
                     name="telefone"
-                    value={form.telefone}
+                    value={formatBRPhone(form.telefone)}
                     onChange={handleChange}
                     placeholder="(11) 99999-9999"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="tel"
                     required
                   />
                 </div>
@@ -466,7 +522,8 @@ export default function Page() {
                     name="nome_desbravador"
                     value={form.nome_desbravador}
                     onChange={handleChange}
-                    placeholder="Ex: João / Unidade Águia"
+                    placeholder="Ex: João Unidade Águia"
+                    inputMode="text"
                     required
                   />
                 </div>
