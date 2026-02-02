@@ -13,10 +13,10 @@ export default function PagamentosHistorico() {
   const [erro, setErro] = useState(null);
   const [ok, setOk] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizaçãos, setOrganizacoes] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
 
-  const [clubeId, setClubeId] = useState("");
+  const [organizacaoId, setOrganizacaoId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
 
   const [busca, setBusca] = useState("");
@@ -51,38 +51,38 @@ export default function PagamentosHistorico() {
         return;
       }
 
-      await carregarClubes();
+      await carregarOrganizacoes();
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function carregarClubes() {
+  async function carregarOrganizacoes() {
     setErro(null);
     setOk(null);
 
     const { data, error } = await supabase
-      .from("clubes")
+      .from("organizacoes")
       .select("id, nome, ativo, criado_em")
       .order("criado_em", { ascending: false });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar clubes.");
+      setErro("Erro ao carregar organizaçãos.");
       return;
     }
 
     const lista = data || [];
-    setClubes(lista);
+    setOrganizacoes(lista);
 
     const ativo = lista.find((c) => c.ativo) || lista[0];
     if (ativo?.id) {
-      setClubeId(ativo.id);
+      setOrganizacaoId(ativo.id);
       await carregarCampanhas(ativo.id);
     }
   }
 
-  async function carregarCampanhas(clube_id) {
+  async function carregarCampanhas(organizacao_id) {
     setErro(null);
     setOk(null);
 
@@ -93,8 +93,8 @@ export default function PagamentosHistorico() {
 
     const { data, error } = await supabase
       .from("campanhas")
-      .select("id, clube_id, nome, ativa, data_inicio, data_fim, criado_em")
-      .eq("clube_id", clube_id)
+      .select("id, organizacao_id, nome, ativa, data_inicio, data_fim, criado_em")
+      .eq("organizacao_id", organizacao_id)
       .order("ativa", { ascending: false })
       .order("data_inicio", { ascending: false });
 
@@ -159,10 +159,10 @@ export default function PagamentosHistorico() {
 
     const lista = pags || [];
 
-    // 3) enriquecer com dados do pedido (para mostrar código/nome/telefone)
+    // 3) enriquecer com dados do pedido (para mostrar código/nome/whatsapp)
     const { data: pedidosInfo, error: infoErr } = await supabase
       .from("pedidos")
-      .select("id, codigo_pedido, nome_comprador, telefone, nome_desbravador, valor_total, status, criado_em")
+      .select("id, codigo_pedido, nome_comprador, whatsapp, nome_referencia, valor_total, status, criado_em")
       .in("id", ids);
 
     if (infoErr) {
@@ -179,8 +179,8 @@ export default function PagamentosHistorico() {
     setCarregando(false);
   }
 
-  async function trocarClube(id) {
-    setClubeId(id);
+  async function trocarOrganizacao(id) {
+    setOrganizacaoId(id);
     await carregarCampanhas(id);
   }
 
@@ -197,8 +197,8 @@ export default function PagamentosHistorico() {
       const tx = String(pg.txid || "").toLowerCase();
       const codigo = String(pg.pedido?.codigo_pedido || "").toLowerCase();
       const nome = String(pg.pedido?.nome_comprador || "").toLowerCase();
-      const tel = String(pg.pedido?.telefone || "").toLowerCase();
-      const desb = String(pg.pedido?.nome_desbravador || "").toLowerCase();
+      const tel = String(pg.pedido?.whatsapp || "").toLowerCase();
+      const desb = String(pg.pedido?.nome_referencia || "").toLowerCase();
       return tx.includes(q) || codigo.includes(q) || nome.includes(q) || tel.includes(q) || desb.includes(q);
     });
   }, [pagamentos, busca]);
@@ -217,8 +217,8 @@ export default function PagamentosHistorico() {
       "valor_pagamento",
       "confirmado_em",
       "nome_comprador",
-      "telefone",
-      "nome_desbravador",
+      "whatsapp",
+      "nome_referencia",
       "valor_pedido",
       "status_pedido",
       "obs_payload",
@@ -232,8 +232,8 @@ export default function PagamentosHistorico() {
         Number(pg.valor || 0).toFixed(2),
         pg.confirmado_em || "",
         pg.pedido?.nome_comprador || "",
-        pg.pedido?.telefone || "",
-        pg.pedido?.nome_desbravador || "",
+        pg.pedido?.whatsapp || "",
+        pg.pedido?.nome_referencia || "",
         Number(pg.pedido?.valor_total || 0).toFixed(2),
         pg.pedido?.status || "",
         String(obs || ""),
@@ -298,9 +298,9 @@ export default function PagamentosHistorico() {
 
           <div className="filters">
             <div>
-              <label>Clube</label>
-              <select value={clubeId} onChange={(e) => trocarClube(e.target.value)}>
-                {clubes.map((c) => (
+              <label>Organização</label>
+              <select value={organizacaoId} onChange={(e) => trocarOrganizacao(e.target.value)}>
+                {organizaçãos.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nome} {c.ativo ? "" : "(inativo)"}
                   </option>
@@ -310,7 +310,7 @@ export default function PagamentosHistorico() {
 
             <div>
               <label>Campanha</label>
-              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!clubeId}>
+              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!organizacaoId}>
                 {campanhas.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.ativa ? "⭐ " : ""}
@@ -321,7 +321,7 @@ export default function PagamentosHistorico() {
             </div>
 
             <div className="span2">
-              <label>Buscar (TXID, DP-000123, nome, telefone…)</label>
+              <label>Buscar (TXID, DP-000123, nome, whatsapp…)</label>
               <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Ex: DP-000123 ou txid…" />
             </div>
           </div>
@@ -356,8 +356,8 @@ export default function PagamentosHistorico() {
                         <span className="pill mid">TXID: {String(pg.txid || "").slice(0, 18)}{String(pg.txid || "").length > 18 ? "…" : ""}</span>
                       </div>
                       <div className="rowSub">
-                        <strong>{pg.pedido?.nome_comprador || "—"}</strong> • {pg.pedido?.telefone || "—"} • Desbravador:{" "}
-                        {pg.pedido?.nome_desbravador || "—"}
+                        <strong>{pg.pedido?.nome_comprador || "—"}</strong> • {pg.pedido?.whatsapp || "—"} • Desbravador:{" "}
+                        {pg.pedido?.nome_referencia || "—"}
                       </div>
                       <div className="rowSub muted2">
                         Confirmado em: <strong>{fmtDateTime(pg.confirmado_em || pg.criado_em)}</strong>
@@ -402,8 +402,8 @@ export default function PagamentosHistorico() {
                   <div className="box">
                     <div className="boxTitle">Pedido</div>
                     <div className="boxValue">{detalhe.pedido?.nome_comprador || "—"}</div>
-                    <div className="boxSmall">Telefone: {detalhe.pedido?.telefone || "—"}</div>
-                    <div className="boxSmall">Desbravador: {detalhe.pedido?.nome_desbravador || "—"}</div>
+                    <div className="boxSmall">Telefone: {detalhe.pedido?.whatsapp || "—"}</div>
+                    <div className="boxSmall">Desbravador: {detalhe.pedido?.nome_referencia || "—"}</div>
                     <div className="boxSmall">
                       Valor do pedido: <strong>R$ {Number(detalhe.pedido?.valor_total || 0).toFixed(2)}</strong> • Status:{" "}
                       <strong>{detalhe.pedido?.status || "—"}</strong>

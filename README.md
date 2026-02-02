@@ -1,4 +1,4 @@
-# Desbrava Pizza 🍕
+# PedeSim
 
 Sistema para campanhas de arrecadação do Clube de Desbravadores.
 
@@ -24,4 +24,3 @@ Crie um arquivo `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-

@@ -4,6 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../src/lib/supabase";
 import { useRouter } from "next/navigation";
 
+
+// --- Helpers: validação/mascara (BR) ---
+function sanitizeNameAlpha(v) {
+  // Mantém apenas letras (inclui acentos) e espaços
+  const raw = String(v ?? "").normalize("NFKC");
+  return raw
+    .replace(/[^À-ɏḀ-ỿA-Za-z ]+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^\s+/g, "");
+}
+
+function sanitizePhoneDigits(v) {
+  // Mantém apenas números (DDD + número). Máx: 11 dígitos.
+  return String(v ?? "").replace(/\D/g, "").slice(0, 11);
+}
+
+function formatBRPhone(digits) {
+  const d = sanitizePhoneDigits(digits);
+  if (!d) return "";
+  const ddd = d.slice(0, 2);
+  const rest = d.slice(2);
+
+  if (d.length < 3) return `(${ddd}`;
+  if (rest.length <= 4) return `(${ddd}) ${rest}`;
+  if (rest.length <= 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+}
+
 export default function AdminPedidos() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -11,10 +39,10 @@ export default function AdminPedidos() {
   const [erro, setErro] = useState(null);
   const [ok, setOk] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizacoes, setOrganizacoes] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
 
-  const [clubeId, setClubeId] = useState("");
+  const [organizacaoId, setOrganizacaoId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
 
   const [busca, setBusca] = useState("");
@@ -22,29 +50,6 @@ export default function AdminPedidos() {
   const [pedidos, setPedidos] = useState([]);
   const [itensPorPedido, setItensPorPedido] = useState({}); // { pedido_id: [{nome, quantidade}] }
   const [detalhe, setDetalhe] = useState(null);
-
-  // =========================
-  // Formatação de telefone (WhatsApp)
-  // - no banco: somente dígitos
-  // - no admin: exibir com máscara BR
-  // =========================
-  function sanitizePhoneDigits(v) {
-    return String(v ?? "")
-      .replace(/\D/g, "")
-      .slice(0, 11);
-  }
-
-  function formatBRPhone(digits) {
-    const d = sanitizePhoneDigits(digits);
-    if (!d) return "";
-    const ddd = d.slice(0, 2);
-    const rest = d.slice(2);
-
-    if (d.length < 3) return `(${ddd}`;
-    if (rest.length <= 4) return `(${ddd}) ${rest}`;
-    if (rest.length <= 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
-    return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
-  }
 
   useEffect(() => {
     (async () => {
@@ -76,38 +81,38 @@ export default function AdminPedidos() {
         return;
       }
 
-      await carregarClubes();
+      await carregarOrganizacoes();
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function carregarClubes() {
+  async function carregarOrganizacoes() {
     setErro(null);
     setOk(null);
 
     const { data, error } = await supabase
-      .from("clubes")
+      .from("organizacoes")
       .select("id, nome, ativo, criado_em")
       .order("criado_em", { ascending: false });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar clubes.");
+      setErro("Erro ao carregar organizações.");
       return;
     }
 
     const lista = data || [];
-    setClubes(lista);
+    setOrganizacoes(lista);
 
     const ativo = lista.find((c) => c.ativo) || lista[0];
     if (ativo?.id) {
-      setClubeId(ativo.id);
+      setOrganizacaoId(ativo.id);
       await carregarCampanhas(ativo.id);
     }
   }
 
-  async function carregarCampanhas(clube_id) {
+  async function carregarCampanhas(organizacao_id) {
     setErro(null);
     setOk(null);
 
@@ -119,8 +124,8 @@ export default function AdminPedidos() {
 
     const { data, error } = await supabase
       .from("campanhas")
-      .select("id, clube_id, nome, ativa, data_inicio, data_fim, valor_pizza, identificador_centavos, criado_em")
-      .eq("clube_id", clube_id)
+      .select("id, organizacao_id, nome, ativa, data_inicio, data_fim, preco_base, identificador_centavos, criado_em")
+      .eq("organizacao_id", organizacao_id)
       .order("ativa", { ascending: false })
       .order("data_inicio", { ascending: false });
 
@@ -148,7 +153,7 @@ export default function AdminPedidos() {
 
     const { data, error } = await supabase
       .from("pedidos")
-      .select("id, codigo_pedido, nome_comprador, telefone, nome_desbravador, quantidade, valor_total, status, criado_em, campanha_id")
+      .select("id, codigo_pedido, nome_comprador, whatsapp, nome_referencia, quantidade, valor_total, status, criado_em, campanha_id")
       .eq("campanha_id", campanha_id)
       .order("criado_em", { ascending: false })
       .limit(500);
@@ -175,14 +180,14 @@ export default function AdminPedidos() {
 
     // Join sabores (quando PostgREST reconhecer)
     const tentativa = await supabase
-      .from("pedido_sabores")
-      .select("pedido_id, quantidade, sabores ( nome )")
+      .from("pedido_itens")
+      .select("pedido_id, quantidade, itens ( nome )")
       .in("pedido_id", pedidoIds);
 
     if (!tentativa.error && tentativa.data) {
       const mapa = {};
       for (const row of tentativa.data) {
-        const nome = row?.sabores?.nome || "Sabor";
+        const nome = row?.sabores?.nome || "Item";
         if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
         mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
       }
@@ -192,8 +197,8 @@ export default function AdminPedidos() {
 
     // Fallback
     const { data: ps, error: psErr } = await supabase
-      .from("pedido_sabores")
-      .select("pedido_id, sabor_id, quantidade")
+      .from("pedido_itens")
+      .select("pedido_id, item_id, quantidade")
       .in("pedido_id", pedidoIds);
 
     if (psErr) {
@@ -202,8 +207,8 @@ export default function AdminPedidos() {
       return;
     }
 
-    const saborIds = Array.from(new Set((ps || []).map((r) => r.sabor_id).filter(Boolean)));
-    const { data: sab, error: sErr } = await supabase.from("sabores").select("id, nome").in("id", saborIds);
+    const saborIds = Array.from(new Set((ps || []).map((r) => r.item_id).filter(Boolean)));
+    const { data: sab, error: sErr } = await supabase.from("itens").select("id, nome").in("id", saborIds);
 
     if (sErr) {
       console.error(sErr);
@@ -211,18 +216,18 @@ export default function AdminPedidos() {
       return;
     }
 
-    const sabMap = new Map((sab || []).map((s) => [s.id, s.nome]));
+    const itemMap = new Map((sab || []).map((s) => [s.id, s.nome]));
     const mapa = {};
     for (const row of ps || []) {
-      const nome = sabMap.get(row.sabor_id) || "Sabor";
+      const nome = itemMap.get(row.item_id) || "Item";
       if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
       mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
     }
     setItensPorPedido(mapa);
   }
 
-  async function trocarClube(id) {
-    setClubeId(id);
+  async function trocarOrganizacao(id) {
+    setOrganizacaoId(id);
     await carregarCampanhas(id);
   }
 
@@ -238,8 +243,8 @@ export default function AdminPedidos() {
     return pedidos.filter((p) => {
       const codigo = String(p.codigo_pedido || "").toLowerCase();
       const nome = String(p.nome_comprador || "").toLowerCase();
-      const tel = String(p.telefone || "").toLowerCase();
-      const desb = String(p.nome_desbravador || "").toLowerCase();
+      const tel = String(p.whatsapp || "").toLowerCase();
+      const desb = String(p.nome_referencia || "").toLowerCase();
       return codigo.includes(q) || nome.includes(q) || tel.includes(q) || desb.includes(q);
     });
   }, [pedidos, busca]);
@@ -285,8 +290,8 @@ export default function AdminPedidos() {
     linhas.push([
       "codigo_pedido",
       "nome_comprador",
-      "telefone",
-      "nome_desbravador",
+      "whatsapp",
+      "nome_referencia",
       "quantidade",
       "valor_total",
       "status",
@@ -300,8 +305,8 @@ export default function AdminPedidos() {
       linhas.push([
         p.codigo_pedido || "",
         p.nome_comprador || "",
-        p.telefone || "",
-        p.nome_desbravador || "",
+        p.whatsapp || "",
+        p.nome_referencia || "",
         String(p.quantidade ?? ""),
         String(Number(p.valor_total || 0).toFixed(2)),
         p.status || "",
@@ -368,9 +373,9 @@ export default function AdminPedidos() {
 
           <div className="filters">
             <div>
-              <label>Clube</label>
-              <select value={clubeId} onChange={(e) => trocarClube(e.target.value)}>
-                {clubes.map((c) => (
+              <label>Organização</label>
+              <select value={organizacaoId} onChange={(e) => trocarOrganizacao(e.target.value)}>
+                {organizações.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nome} {c.ativo ? "" : "(inativo)"}
                   </option>
@@ -380,7 +385,7 @@ export default function AdminPedidos() {
 
             <div>
               <label>Campanha</label>
-              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!clubeId}>
+              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!organizacaoId}>
                 {campanhas.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.ativa ? "⭐ " : ""}{c.nome}
@@ -394,7 +399,7 @@ export default function AdminPedidos() {
               <input
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
-                placeholder="Código (DP-000123), nome, telefone, desbravador…"
+                placeholder="Código (DP-000123), nome, whatsapp, desbravador…"
               />
             </div>
           </div>
@@ -442,13 +447,13 @@ export default function AdminPedidos() {
                           <StatusPill status={p.status} />
                         </div>
                         <div className="rowSub">
-                          <strong>{sanitizeOnlyLetters(p.nome_comprador)}</strong> • {formatBRPhone(p.telefone) || "—"} • Desbravador: {sanitizeOnlyLetters(p.nome_desbravador)}
+                          <strong>{sanitizeNameAlpha(p.nome_comprador)}</strong> • {formatBRPhone(p.whatsapp) || "—"} • Desbravador: {sanitizeNameAlpha(p.nome_referencia)}
                         </div>
                         <div className="rowSub">
                           {itens.length > 0 ? (
                             <span className="muted2">{itens.map((i) => `${i.nome} x${i.quantidade}`).join(" • ")}</span>
                           ) : (
-                            <span className="muted2">Sabores: —</span>
+                            <span className="muted2">Itemes: —</span>
                           )}
                         </div>
                       </div>
@@ -475,7 +480,7 @@ export default function AdminPedidos() {
                       <StatusPill status={detalhe.status} />
                     </div>
                     <div className="modalSub">
-                      {sanitizeOnlyLetters(detalhe.nome_comprador)} • {formatBRPhone(detalhe.telefone) || "—"} • Desbravador: {sanitizeOnlyLetters(detalhe.nome_desbravador)}
+                      {sanitizeNameAlpha(detalhe.nome_comprador)} • {formatBRPhone(detalhe.whatsapp) || "—"} • Desbravador: {sanitizeNameAlpha(detalhe.nome_referencia)}
                     </div>
                   </div>
                   <button className="btnMini" onClick={() => setDetalhe(null)} type="button">
@@ -492,7 +497,7 @@ export default function AdminPedidos() {
                   </div>
 
                   <div className="box">
-                    <div className="boxTitle">Sabores</div>
+                    <div className="boxTitle">Itemes</div>
                     <div className="chips">
                       {(itensPorPedido[detalhe.id] || []).length ? (
                         (itensPorPedido[detalhe.id] || []).map((i, idx) => (
@@ -534,14 +539,6 @@ export default function AdminPedidos() {
       <Style />
     </>
   );
-}
-
-function sanitizeOnlyLetters(v) {
-  const raw = String(v ?? "").normalize("NFKC");
-  return raw
-    .replace(/[^\p{L} ]+/gu, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
 }
 
 function StatusPill({ status }) {

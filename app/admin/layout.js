@@ -156,7 +156,7 @@ export default function AdminLayout({ children }) {
           <div className="logo">🍕</div>
           {!collapsed && (
             <div className="brandText">
-              <div className="brandTitle">Desbrava Pizza</div>
+              <div className="brandTitle">PedeSim</div>
               <div className="brandSub">Painel Admin</div>
             </div>
           )}

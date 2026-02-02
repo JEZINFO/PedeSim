@@ -13,10 +13,10 @@ export default function AdminPagamentos() {
   const [erro, setErro] = useState(null);
   const [ok, setOk] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizacoes, setOrganizacoes] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
 
-  const [clubeId, setClubeId] = useState("");
+  const [organizacaoId, setOrganizacaoId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
 
   const [pedidos, setPedidos] = useState([]);
@@ -57,38 +57,38 @@ export default function AdminPagamentos() {
         return;
       }
 
-      await carregarClubes();
+      await carregarOrganizacoes();
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function carregarClubes() {
+  async function carregarOrganizacoes() {
     setErro(null);
     setOk(null);
 
     const { data, error } = await supabase
-      .from("clubes")
+      .from("organizacoes")
       .select("id, nome, ativo, criado_em")
       .order("criado_em", { ascending: false });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar clubes.");
+      setErro("Erro ao carregar organizacoes.");
       return;
     }
 
     const lista = data || [];
-    setClubes(lista);
+    setOrganizacoes(lista);
 
     const ativo = lista.find((c) => c.ativo) || lista[0];
     if (ativo?.id) {
-      setClubeId(ativo.id);
+      setOrganizacaoId(ativo.id);
       await carregarCampanhas(ativo.id);
     }
   }
 
-  async function carregarCampanhas(clube_id) {
+  async function carregarCampanhas(organizacao_id) {
     setErro(null);
     setOk(null);
 
@@ -100,8 +100,8 @@ export default function AdminPagamentos() {
 
     const { data, error } = await supabase
       .from("campanhas")
-      .select("id, clube_id, nome, ativa, data_inicio, data_fim, valor_pizza, identificador_centavos, criado_em")
-      .eq("clube_id", clube_id)
+      .select("id, organizacao_id, nome, ativa, data_inicio, data_fim, preco_base, identificador_centavos, criado_em")
+      .eq("organizacao_id", organizacao_id)
       .order("ativa", { ascending: false })
       .order("data_inicio", { ascending: false });
 
@@ -130,7 +130,7 @@ export default function AdminPagamentos() {
     const { data, error } = await supabase
       .from("pedidos")
       .select(
-        "id, codigo_pedido, nome_comprador, telefone, nome_desbravador, quantidade, valor_total, status, criado_em, campanha_id"
+        "id, codigo_pedido, nome_comprador, whatsapp, nome_referencia, quantidade, valor_total, status, criado_em, campanha_id"
       )
       .eq("campanha_id", campanha_id)
       .in("status", ["aguardando_pagamento", "em_analise"])
@@ -158,14 +158,14 @@ export default function AdminPagamentos() {
     }
 
     const tentativa = await supabase
-      .from("pedido_sabores")
-      .select("pedido_id, quantidade, sabores ( nome )")
+      .from("pedido_itens")
+      .select("pedido_id, quantidade, itens ( nome )")
       .in("pedido_id", pedidoIds);
 
     if (!tentativa.error && tentativa.data) {
       const mapa = {};
       for (const row of tentativa.data) {
-        const nome = row?.sabores?.nome || "Sabor";
+        const nome = row?.sabores?.nome || "Item";
         if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
         mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
       }
@@ -174,8 +174,8 @@ export default function AdminPagamentos() {
     }
 
     const { data: ps, error: psErr } = await supabase
-      .from("pedido_sabores")
-      .select("pedido_id, sabor_id, quantidade")
+      .from("pedido_itens")
+      .select("pedido_id, item_id, quantidade")
       .in("pedido_id", pedidoIds);
 
     if (psErr) {
@@ -184,8 +184,8 @@ export default function AdminPagamentos() {
       return;
     }
 
-    const saborIds = Array.from(new Set((ps || []).map((r) => r.sabor_id).filter(Boolean)));
-    const { data: sab, error: sErr } = await supabase.from("sabores").select("id, nome").in("id", saborIds);
+    const saborIds = Array.from(new Set((ps || []).map((r) => r.item_id).filter(Boolean)));
+    const { data: sab, error: sErr } = await supabase.from("itens").select("id, nome").in("id", saborIds);
     if (sErr) {
       console.error(sErr);
       setItensPorPedido({});
@@ -195,15 +195,15 @@ export default function AdminPagamentos() {
     const sabMap = new Map((sab || []).map((s) => [s.id, s.nome]));
     const mapa = {};
     for (const row of ps || []) {
-      const nome = sabMap.get(row.sabor_id) || "Sabor";
+      const nome = sabMap.get(row.item_id) || "Item";
       if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
       mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
     }
     setItensPorPedido(mapa);
   }
 
-  async function trocarClube(id) {
-    setClubeId(id);
+  async function trocarOrganizacao(id) {
+    setOrganizacaoId(id);
     await carregarCampanhas(id);
   }
 
@@ -373,9 +373,9 @@ export default function AdminPagamentos() {
 
           <div className="filters">
             <div>
-              <label>Clube</label>
-              <select value={clubeId} onChange={(e) => trocarClube(e.target.value)}>
-                {clubes.map((c) => (
+              <label>Organização</label>
+              <select value={organizacaoId} onChange={(e) => trocarOrganizacao(e.target.value)}>
+                {organizacoes.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nome} {c.ativo ? "" : "(inativo)"}
                   </option>
@@ -385,7 +385,7 @@ export default function AdminPagamentos() {
 
             <div>
               <label>Campanha</label>
-              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!clubeId}>
+              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!organizacaoId}>
                 {campanhas.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.ativa ? "⭐ " : ""}
@@ -470,10 +470,10 @@ export default function AdminPagamentos() {
                             ) : null}
                           </div>
                           <div className="rowSub">
-                            <strong>{p.nome_comprador}</strong> • {p.telefone} • Desbravador: {p.nome_desbravador}
+                            <strong>{p.nome_comprador}</strong> • {p.whatsapp} • Desbravador: {p.nome_referencia}
                           </div>
                           <div className="rowSub muted2">
-                            {itens.length ? itens.map((i) => `${i.nome} x${i.quantidade}`).join(" • ") : "Sabores: —"}
+                            {itens.length ? itens.map((i) => `${i.nome} x${i.quantidade}`).join(" • ") : "Itemes: —"}
                           </div>
                         </div>
 
@@ -504,9 +504,9 @@ export default function AdminPagamentos() {
                       Total do pedido: <strong>R$ {Number(selecionado.valor_total || 0).toFixed(2)}</strong>
                     </div>
                     <div className="boxSmall">
-                      Comprador: <strong>{selecionado.nome_comprador}</strong> • {selecionado.telefone}
+                      Comprador: <strong>{selecionado.nome_comprador}</strong> • {selecionado.whatsapp}
                     </div>
-                    <div className="boxSmall">Desbravador: {selecionado.nome_desbravador}</div>
+                    <div className="boxSmall">Desbravador: {selecionado.nome_referencia}</div>
                   </div>
 
                   <div className="box">

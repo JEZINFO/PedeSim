@@ -67,7 +67,7 @@ export default function LoginPage() {
             <div className="logo">🔒</div>
             <div>
               <h1>Área Administrativa</h1>
-              <p className="muted">Desbrava Pizza • Amigos do Paraíso</p>
+              <p className="muted">PedeSim • Amigos do Paraíso</p>
             </div>
           </div>
 

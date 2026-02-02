@@ -13,10 +13,10 @@ export default function RelatorioProducao() {
   const [erro, setErro] = useState(null);
   const [info, setInfo] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizaçãos, setOrganizacoes] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
 
-  const [clubeId, setClubeId] = useState("");
+  const [organizacaoId, setOrganizacaoId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
 
   const [incluirPendentes, setIncluirPendentes] = useState(true);
@@ -46,38 +46,38 @@ export default function RelatorioProducao() {
         return;
       }
 
-      await carregarClubes();
+      await carregarOrganizacoes();
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function carregarClubes() {
+  async function carregarOrganizacoes() {
     setErro(null);
     setInfo(null);
 
     const { data, error } = await supabase
-      .from("clubes")
+      .from("organizacoes")
       .select("id, nome, ativo, criado_em")
       .order("criado_em", { ascending: false });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar clubes.");
+      setErro("Erro ao carregar organizaçãos.");
       return;
     }
 
     const lista = data || [];
-    setClubes(lista);
+    setOrganizacoes(lista);
 
     const ativo = lista.find((c) => c.ativo) || lista[0];
     if (ativo?.id) {
-      setClubeId(ativo.id);
+      setOrganizacaoId(ativo.id);
       await carregarCampanhas(ativo.id);
     }
   }
 
-  async function carregarCampanhas(clube_id) {
+  async function carregarCampanhas(organizacao_id) {
     setErro(null);
     setInfo(null);
 
@@ -88,8 +88,8 @@ export default function RelatorioProducao() {
 
     const { data, error } = await supabase
       .from("campanhas")
-      .select("id, clube_id, nome, ativa, data_inicio, data_fim, valor_pizza, criado_em")
-      .eq("clube_id", clube_id)
+      .select("id, organizacao_id, nome, ativa, data_inicio, data_fim, preco_base, criado_em")
+      .eq("organizacao_id", organizacao_id)
       .order("ativa", { ascending: false })
       .order("data_inicio", { ascending: false });
 
@@ -124,7 +124,7 @@ export default function RelatorioProducao() {
     // 1) Buscar pedidos da campanha com status permitido
     const { data: pedidos, error: pErr } = await supabase
       .from("pedidos")
-      .select("id, status, codigo_pedido, nome_comprador, telefone, criado_em, campanha_id")
+      .select("id, status, codigo_pedido, nome_comprador, whatsapp, criado_em, campanha_id")
       .eq("campanha_id", campanha_id)
       .in("status", statusOk)
       .limit(5000);
@@ -149,23 +149,23 @@ export default function RelatorioProducao() {
 
     const pedidoIds = listaPedidos.map((p) => p.id);
 
-    // 2) Buscar pedido_sabores desses pedidos + nome do sabor
+    // 2) Buscar pedido_itens desses pedidos + nome do sabor
     const { data: ps, error: psErr } = await supabase
-      .from("pedido_sabores")
-      .select("pedido_id, sabor_id, quantidade, sabores ( id, nome )")
+      .from("pedido_itens")
+      .select("pedido_id, item_id, quantidade, itens ( id, nome )")
       .in("pedido_id", pedidoIds)
       .limit(20000);
 
     if (psErr) {
       console.error(psErr);
-      setErro("Erro ao buscar itens (pedido_sabores).");
+      setErro("Erro ao buscar itens (pedido_itens).");
       setCarregando(false);
       return;
     }
 
     const listaPS = ps || [];
     if (listaPS.length === 0) {
-      setInfo("Há pedidos, mas nenhum item de sabor foi encontrado (pedido_sabores vazio).");
+      setInfo("Há pedidos, mas nenhum item de sabor foi encontrado (pedido_itens vazio).");
       setCarregando(false);
       return;
     }
@@ -179,7 +179,7 @@ export default function RelatorioProducao() {
         return {
           quantidade: Number(row.quantidade || 0),
           pedido,
-          sabor: row.sabores || { id: row.sabor_id, nome: "Sabor" },
+          sabor: row.itens || { id: row.item_id, nome: "Item" },
         };
       })
       .filter(Boolean);
@@ -188,8 +188,8 @@ export default function RelatorioProducao() {
     setCarregando(false);
   }
 
-  async function trocarClube(id) {
-    setClubeId(id);
+  async function trocarOrganizacao(id) {
+    setOrganizacaoId(id);
     await carregarCampanhas(id);
   }
 
@@ -206,21 +206,21 @@ export default function RelatorioProducao() {
   }
 
   const agregados = useMemo(() => {
-    const porSabor = new Map();
+    const porItem = new Map();
     const porStatus = new Map();
     let total = 0;
 
     for (const row of linhas) {
       const qtd = Number(row.quantidade || 0);
-      const saborNome = row?.sabor?.nome || "Sabor";
+      const saborNome = row?.sabor?.nome || "Item";
       const status = row?.pedido?.status || "—";
 
       total += qtd;
-      porSabor.set(saborNome, (porSabor.get(saborNome) || 0) + qtd);
+      porItem.set(saborNome, (porItem.get(saborNome) || 0) + qtd);
       porStatus.set(status, (porStatus.get(status) || 0) + qtd);
     }
 
-    const saboresOrdenados = Array.from(porSabor.entries())
+    const itensOrdenados = Array.from(porItem.entries())
       .map(([nome, qtd]) => ({ nome, qtd }))
       .sort((a, b) => b.qtd - a.qtd);
 
@@ -228,14 +228,14 @@ export default function RelatorioProducao() {
       .map(([status, qtd]) => ({ status, qtd }))
       .sort((a, b) => b.qtd - a.qtd);
 
-    return { total, saboresOrdenados, statusOrdenados };
+    return { total, itensOrdenados, statusOrdenados };
   }, [linhas]);
 
   function exportarCSV() {
     const linhasCsv = [];
     linhasCsv.push(["sabor", "quantidade"]);
 
-    for (const s of agregados.saboresOrdenados) {
+    for (const s of agregados.itensOrdenados) {
       linhasCsv.push([s.nome, String(s.qtd)]);
     }
 
@@ -288,7 +288,7 @@ export default function RelatorioProducao() {
               <button className="btnLight" onClick={() => router.push("/admin")}>
                 Voltar
               </button>
-              <button className="btnLight" onClick={exportarCSV} disabled={agregados.saboresOrdenados.length === 0}>
+              <button className="btnLight" onClick={exportarCSV} disabled={agregados.itensOrdenados.length === 0}>
                 Exportar CSV
               </button>
               <button className="btn" onClick={imprimir}>
@@ -302,9 +302,9 @@ export default function RelatorioProducao() {
 
           <div className="filters noPrint">
             <div>
-              <label>Clube</label>
-              <select value={clubeId} onChange={(e) => trocarClube(e.target.value)}>
-                {clubes.map((c) => (
+              <label>Organização</label>
+              <select value={organizacaoId} onChange={(e) => trocarOrganizacao(e.target.value)}>
+                {organizaçãos.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nome} {c.ativo ? "" : "(inativo)"}
                   </option>
@@ -314,7 +314,7 @@ export default function RelatorioProducao() {
 
             <div>
               <label>Campanha</label>
-              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!clubeId}>
+              <select value={campanhaId} onChange={(e) => trocarCampanha(e.target.value)} disabled={!organizacaoId}>
                 {campanhas.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.ativa ? "⭐ " : ""}
@@ -354,8 +354,8 @@ export default function RelatorioProducao() {
             </div>
 
             <div className="kpi">
-              <div className="kTitle">Sabores diferentes</div>
-              <div className="kValue">{agregados.saboresOrdenados.length}</div>
+              <div className="kTitle">Itemes diferentes</div>
+              <div className="kValue">{agregados.itensOrdenados.length}</div>
               <div className="kSmall">Ordenado por quantidade</div>
             </div>
 
@@ -379,16 +379,16 @@ export default function RelatorioProducao() {
               {carregando ? <span className="miniMuted"> • carregando…</span> : null}
             </div>
 
-            {agregados.saboresOrdenados.length === 0 ? (
+            {agregados.itensOrdenados.length === 0 ? (
               <div className="empty">Nenhum dado encontrado para esta campanha.</div>
             ) : (
               <div className="table">
                 <div className="thead">
-                  <div>Sabor</div>
+                  <div>Item</div>
                   <div className="right">Qtd</div>
                 </div>
 
-                {agregados.saboresOrdenados.map((s) => (
+                {agregados.itensOrdenados.map((s) => (
                   <div key={s.nome} className="trow">
                     <div className="name">{s.nome}</div>
                     <div className="right strong">{s.qtd}</div>
@@ -405,7 +405,7 @@ export default function RelatorioProducao() {
 
           <div className="note noPrint">
             Se aparecer “Há pedidos mas nenhum item”, significa que existem pedidos sem registros em{" "}
-            <strong>pedido_sabores</strong> (ou algum pedido foi criado e não gravou os sabores).
+            <strong>pedido_itens</strong> (ou algum pedido foi criado e não gravou os itens).
           </div>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../src/lib/supabase";
 import { useRouter } from "next/navigation";
 
-export default function AdminSabores() {
+export default function AdminItens() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -12,7 +12,7 @@ export default function AdminSabores() {
   const [ok, setOk] = useState(null);
 
   const [campanhas, setCampanhas] = useState([]);
-  const [sabores, setSabores] = useState([]);
+  const [itemes, setItens] = useState([]);
 
   const [campanhaId, setCampanhaId] = useState("");
 
@@ -66,34 +66,34 @@ export default function AdminSabores() {
     setCampanhaId(chosen);
 
     if (chosen) {
-      await carregarSabores(chosen);
+      await carregarItens(chosen);
     } else {
-      setSabores([]);
+      setItens([]);
     }
 
     setLoading(false);
   }
 
-  async function carregarSabores(id) {
+  async function carregarItens(id) {
     setErro(null);
     const { data, error } = await supabase
-      .from("sabores")
+      .from("itens")
       .select("id, campanha_id, nome, ativo, ordem")
       .eq("campanha_id", id)
       .order("ordem", { ascending: true });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar sabores.");
+      setErro("Erro ao carregar itemes.");
       return;
     }
 
-    setSabores(data || []);
+    setItens(data || []);
   }
 
   async function trocarCampanha(id) {
     setCampanhaId(id);
-    await carregarSabores(id);
+    await carregarItens(id);
   }
 
   function onChange(e) {
@@ -111,7 +111,7 @@ export default function AdminSabores() {
 
     if (!campanhaId) return setErro("Selecione uma campanha.");
     const nome = String(form.nome || "").trim();
-    if (!nome) return setErro("Informe o nome do sabor.");
+    if (!nome) return setErro("Informe o nome do item.");
 
     const ordem = Number(form.ordem || 0);
     const payload = {
@@ -121,57 +121,57 @@ export default function AdminSabores() {
       ativo: !!form.ativo,
     };
 
-    const { error } = await supabase.from("sabores").insert(payload);
+    const { error } = await supabase.from("itens").insert(payload);
     if (error) return setErro(error.message);
 
     setOk("Sabor adicionado ✅");
     setForm({ nome: "", ordem: 0, ativo: true });
-    await carregarSabores(campanhaId);
+    await carregarItens(campanhaId);
   }
 
   async function toggleAtivo(s) {
     setErro(null);
     setOk(null);
 
-    const { error } = await supabase.from("sabores").update({ ativo: !s.ativo }).eq("id", s.id);
+    const { error } = await supabase.from("itens").update({ ativo: !s.ativo }).eq("id", s.id);
     if (error) return setErro(error.message);
 
-    await carregarSabores(campanhaId);
+    await carregarItens(campanhaId);
   }
 
   async function salvarOrdem(s, novaOrdem) {
     const ordem = Number(novaOrdem);
     if (!Number.isFinite(ordem)) return;
 
-    const { error } = await supabase.from("sabores").update({ ordem }).eq("id", s.id);
+    const { error } = await supabase.from("itens").update({ ordem }).eq("id", s.id);
     if (error) return setErro(error.message);
 
     setOk("Ordem atualizada ✅");
-    await carregarSabores(campanhaId);
+    await carregarItens(campanhaId);
   }
 
   async function renomear(s) {
-    const novo = prompt("Novo nome do sabor:", s.nome);
+    const novo = prompt("Novo nome do item:", s.nome);
     if (novo == null) return;
     const nome = String(novo).trim();
     if (!nome) return;
 
-    const { error } = await supabase.from("sabores").update({ nome }).eq("id", s.id);
+    const { error } = await supabase.from("itens").update({ nome }).eq("id", s.id);
     if (error) return setErro(error.message);
 
     setOk("Nome atualizado ✅");
-    await carregarSabores(campanhaId);
+    await carregarItens(campanhaId);
   }
 
   async function remover(s) {
-    const ok = confirm(`Remover o sabor "${s.nome}"?`);
+    const ok = confirm(`Remover o item "${s.nome}"?`);
     if (!ok) return;
 
-    const { error } = await supabase.from("sabores").delete().eq("id", s.id);
+    const { error } = await supabase.from("itens").delete().eq("id", s.id);
     if (error) return setErro(error.message);
 
     setOk("Sabor removido ✅");
-    await carregarSabores(campanhaId);
+    await carregarItens(campanhaId);
   }
 
   if (loading) {
@@ -179,7 +179,7 @@ export default function AdminSabores() {
       <>
         <div className="bg">
           <div className="card">
-            <h1>Sabores</h1>
+            <h1>Itens</h1>
             <p className="muted">Carregando…</p>
           </div>
         </div>
@@ -194,8 +194,8 @@ export default function AdminSabores() {
         <div className="card">
           <div className="top">
             <div>
-              <h1>Sabores</h1>
-              <p className="muted">Cadastre e organize os sabores por campanha</p>
+              <h1>Itens</h1>
+              <p className="muted">Cadastre e organize os itemes por campanha</p>
             </div>
             <button className="btnLight" onClick={() => router.push("/admin")}>
               Voltar
@@ -224,13 +224,13 @@ export default function AdminSabores() {
 
           <div className="grid">
             <div className="panel">
-              <div className="panelTitle">Lista de sabores</div>
+              <div className="panelTitle">Lista de itemes</div>
 
-              {sabores.length === 0 ? (
-                <div className="empty">Nenhum sabor cadastrado para esta campanha.</div>
+              {itemes.length === 0 ? (
+                <div className="empty">Nenhum item cadastrado para esta campanha.</div>
               ) : (
                 <div className="list">
-                  {sabores.map((s) => (
+                  {itemes.map((s) => (
                     <div key={s.id} className="rowItem">
                       <div>
                         <div className="rowTitle">
@@ -268,10 +268,10 @@ export default function AdminSabores() {
             </div>
 
             <div className="panel">
-              <div className="panelTitle">Adicionar novo sabor</div>
+              <div className="panelTitle">Adicionar novo item</div>
 
               <form onSubmit={adicionar} className="form">
-                <label>Nome do sabor</label>
+                <label>Nome do item</label>
                 <input
                   name="nome"
                   value={form.nome}

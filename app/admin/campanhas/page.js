@@ -11,16 +11,16 @@ export default function AdminCampanhas() {
   const [erro, setErro] = useState(null);
   const [ok, setOk] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizacoes, setOrganizacoes] = useState([]);
   const [campanhas, setCampanhas] = useState([]);
 
   const [editando, setEditando] = useState(null); // id da campanha ou null
   const [form, setForm] = useState({
-    clube_id: "",
+    organizacao_id: "",
     nome: "",
     data_inicio: "",
     data_fim: "",
-    valor_pizza: 0,
+    preco_base: 0,
     identificador_centavos: 0.01,
     ativa: false,
   });
@@ -42,25 +42,25 @@ export default function AdminCampanhas() {
     setErro(null);
     setOk(null);
 
-    // clubes
-    const { data: clubesData, error: clubesError } = await supabase
-      .from("clubes")
+    // organizacoes
+    const { data: organizacoesData, error: organizacoesError } = await supabase
+      .from("organizacoes")
       .select("id, nome, ativo, criado_em")
       .order("criado_em", { ascending: false });
 
-    if (clubesError) {
-      console.error(clubesError);
-      setErro("Erro ao carregar clubes (verifique RLS/admin).");
+    if (organizacoesError) {
+      console.error(organizacoesError);
+      setErro("Erro ao carregar organizacoes (verifique RLS/admin).");
       setLoading(false);
       return;
     }
 
-    setClubes(clubesData || []);
+    setOrganizacoes(organizacoesData || []);
 
     // campanhas
     const { data: campData, error: campError } = await supabase
       .from("campanhas")
-      .select("id, clube_id, nome, data_inicio, data_fim, valor_pizza, identificador_centavos, ativa, criado_em")
+      .select("id, organizacao_id, nome, data_inicio, data_fim, preco_base, identificador_centavos, ativa, criado_em")
       .order("criado_em", { ascending: false });
 
     if (campError) {
@@ -73,17 +73,17 @@ export default function AdminCampanhas() {
     setCampanhas(campData || []);
     setLoading(false);
 
-    // se tiver 1 clube e nenhum selecionado, setar default
-    if ((clubesData || []).length === 1 && !form.clube_id) {
-      setForm((p) => ({ ...p, clube_id: clubesData[0].id }));
+    // se tiver 1 organização e nenhum selecionado, setar default
+    if ((organizacoesData || []).length === 1 && !form.organizacao_id) {
+      setForm((p) => ({ ...p, organizacao_id: organizacoesData[0].id }));
     }
   }
 
-  const clubesMap = useMemo(() => {
+  const organizacoesMap = useMemo(() => {
     const m = new Map();
-    (clubes || []).forEach((c) => m.set(c.id, c.nome));
+    (organizacoes || []).forEach((c) => m.set(c.id, c.nome));
     return m;
-  }, [clubes]);
+  }, [organizacoes]);
 
   function onChange(e) {
     const { name, value, type, checked } = e.target;
@@ -98,11 +98,11 @@ export default function AdminCampanhas() {
     setOk(null);
     setEditando(null);
     setForm({
-      clube_id: (clubes?.[0]?.id) || "",
+      organizacao_id: (organizacoes?.[0]?.id) || "",
       nome: "",
       data_inicio: "",
       data_fim: "",
-      valor_pizza: 0,
+      preco_base: 0,
       identificador_centavos: 0.01,
       ativa: false,
     });
@@ -113,11 +113,11 @@ export default function AdminCampanhas() {
     setOk(null);
     setEditando(c.id);
     setForm({
-      clube_id: c.clube_id || "",
+      organizacao_id: c.organizacao_id || "",
       nome: c.nome || "",
       data_inicio: c.data_inicio || "",
       data_fim: c.data_fim || "",
-      valor_pizza: Number(c.valor_pizza || 0),
+      preco_base: Number(c.preco_base || 0),
       identificador_centavos: Number(c.identificador_centavos ?? 0.01),
       ativa: !!c.ativa,
     });
@@ -128,12 +128,12 @@ export default function AdminCampanhas() {
     setErro(null);
     setOk(null);
 
-    if (!form.clube_id) return setErro("Selecione um clube.");
+    if (!form.organizacao_id) return setErro("Selecione um organização.");
     if (!String(form.nome || "").trim()) return setErro("Informe o nome da campanha.");
     if (!form.data_inicio) return setErro("Informe a data de início.");
     if (!form.data_fim) return setErro("Informe a data de fim.");
 
-    const valorPizza = Number(form.valor_pizza);
+    const valorPizza = Number(form.preco_base);
     if (!Number.isFinite(valorPizza) || valorPizza <= 0) return setErro("Valor da pizza deve ser maior que zero.");
 
     const identificador = Number(form.identificador_centavos);
@@ -141,21 +141,21 @@ export default function AdminCampanhas() {
       return setErro("Identificador (centavos) deve ser entre 0,00 e 0,99.");
 
     const payload = {
-      clube_id: form.clube_id,
+      organizacao_id: form.organizacao_id,
       nome: String(form.nome).trim(),
       data_inicio: form.data_inicio,
       data_fim: form.data_fim,
-      valor_pizza: Math.round(valorPizza * 100) / 100,
+      preco_base: Math.round(valorPizza * 100) / 100,
       identificador_centavos: Math.round(identificador * 100) / 100,
       ativa: !!form.ativa,
     };
 
-    // Se marcar como ativa, desativa as outras antes (para manter só 1 ativa por clube)
+    // Se marcar como ativa, desativa as outras antes (para manter só 1 ativa por organização)
     if (payload.ativa) {
       const { error: offError } = await supabase
         .from("campanhas")
         .update({ ativa: false })
-        .eq("clube_id", payload.clube_id);
+        .eq("organizacao_id", payload.organizacao_id);
 
       if (offError) {
         console.error(offError);
@@ -189,11 +189,11 @@ export default function AdminCampanhas() {
     setErro(null);
     setOk(null);
 
-    // desativa outras do mesmo clube e ativa a escolhida
+    // desativa outras do mesmo organização e ativa a escolhida
     const { error: offError } = await supabase
       .from("campanhas")
       .update({ ativa: false })
-      .eq("clube_id", c.clube_id);
+      .eq("organizacao_id", c.organizacao_id);
 
     if (offError) return setErro("Erro ao desativar outras campanhas.");
 
@@ -240,7 +240,7 @@ export default function AdminCampanhas() {
           <div className="top">
             <div>
               <h1>Campanhas</h1>
-              <p className="muted">Criar e manter campanhas do Desbrava Pizza</p>
+              <p className="muted">Criar e manter campanhas do PedeSim</p>
             </div>
             <div className="topRight">
               <button className="btnLight" onClick={() => router.push("/admin")}>
@@ -270,8 +270,8 @@ export default function AdminCampanhas() {
                           {c.nome} {c.ativa ? <span className="pill ok">ATIVA</span> : <span className="pill">inativa</span>}
                         </div>
                         <div className="rowSub">
-                          Clube: <strong>{clubesMap.get(c.clube_id) || "—"}</strong> •{" "}
-                          {fmtData(c.data_inicio)} → {fmtData(c.data_fim)} • R$ {Number(c.valor_pizza).toFixed(2)} • ID:{" "}
+                          Organização: <strong>{organizacoesMap.get(c.organizacao_id) || "—"}</strong> •{" "}
+                          {fmtData(c.data_inicio)} → {fmtData(c.data_fim)} • R$ {Number(c.preco_base).toFixed(2)} • ID:{" "}
                           {Number(c.identificador_centavos ?? 0.01).toFixed(2)}
                         </div>
                       </div>
@@ -298,10 +298,10 @@ export default function AdminCampanhas() {
               <div className="panelTitle">{editando ? "Editar campanha" : "Nova campanha"}</div>
 
               <form onSubmit={salvar} className="form">
-                <label>Clube</label>
-                <select name="clube_id" value={form.clube_id} onChange={onChange}>
+                <label>Organização</label>
+                <select name="organizacao_id" value={form.organizacao_id} onChange={onChange}>
                   <option value="">Selecione…</option>
-                  {clubes.map((c) => (
+                  {organizacoes.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nome} {c.ativo ? "" : "(inativo)"}
                     </option>
@@ -309,7 +309,7 @@ export default function AdminCampanhas() {
                 </select>
 
                 <label>Nome</label>
-                <input name="nome" value={form.nome} onChange={onChange} placeholder="Desbrava Pizza Fevereiro" />
+                <input name="nome" value={form.nome} onChange={onChange} placeholder="PedeSim Fevereiro" />
 
                 <div className="grid2">
                   <div>
@@ -325,7 +325,7 @@ export default function AdminCampanhas() {
                 <div className="grid2">
                   <div>
                     <label>Valor da pizza (R$)</label>
-                    <input type="number" step="0.01" name="valor_pizza" value={form.valor_pizza} onChange={onChange} />
+                    <input type="number" step="0.01" name="preco_base" value={form.preco_base} onChange={onChange} />
                   </div>
                   <div>
                     <label>Identificador (centavos)</label>
@@ -343,7 +343,7 @@ export default function AdminCampanhas() {
 
                 <label className="check">
                   <input type="checkbox" name="ativa" checked={form.ativa} onChange={onChange} />
-                  Marcar como ativa (desativa as outras do mesmo clube)
+                  Marcar como ativa (desativa as outras do mesmo organização)
                 </label>
 
                 <button className="btn" type="submit">

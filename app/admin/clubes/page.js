@@ -4,14 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../src/lib/supabase";
 import { useRouter } from "next/navigation";
 
-export default function AdminClubes() {
+export default function AdminOrganizacoes() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
   const [ok, setOk] = useState(null);
 
-  const [clubes, setClubes] = useState([]);
+  const [organizacoes, setOrganizacoes] = useState([]);
 
   // edição
   const [editandoId, setEditandoId] = useState(null); // null = criando novo
@@ -24,7 +24,7 @@ export default function AdminClubes() {
     ativo: true,
   });
 
-  const tituloForm = useMemo(() => (editandoId ? "Editar clube" : "Novo clube"), [editandoId]);
+  const tituloForm = useMemo(() => (editandoId ? "Editar organização" : "Nova organização"), [editandoId]);
 
   useEffect(() => {
     (async () => {
@@ -44,18 +44,18 @@ export default function AdminClubes() {
     setOk(null);
 
     const { data, error } = await supabase
-      .from("clubes")
+      .from("organizacoes")
       .select("id, nome, tipo_chave_pix, chave_pix, banco_pix, identificador_pix, ativo, criado_em") // ✅ NOVO
       .order("criado_em", { ascending: false });
 
     if (error) {
       console.error(error);
-      setErro("Erro ao carregar clubes (verifique RLS/admin).");
+      setErro("Erro ao carregar organizacoes (verifique RLS/admin).");
       setLoading(false);
       return;
     }
 
-    setClubes(data || []);
+    setOrganizacoes(data || []);
     setLoading(false);
   }
 
@@ -133,7 +133,7 @@ export default function AdminClubes() {
     };
 
     if (!editandoId) {
-      const { error } = await supabase.from("clubes").insert(payload);
+      const { error } = await supabase.from("organizacoes").insert(payload);
       if (error) return setErro(error.message);
 
       setOk("Clube criado ✅");
@@ -142,7 +142,7 @@ export default function AdminClubes() {
       return;
     }
 
-    const { error } = await supabase.from("clubes").update(payload).eq("id", editandoId);
+    const { error } = await supabase.from("organizacoes").update(payload).eq("id", editandoId);
     if (error) return setErro(error.message);
 
     setOk("Clube atualizado ✅");
@@ -153,7 +153,7 @@ export default function AdminClubes() {
     setErro(null);
     setOk(null);
 
-    const { error } = await supabase.from("clubes").update({ ativo: !c.ativo }).eq("id", c.id);
+    const { error } = await supabase.from("organizacoes").update({ ativo: !c.ativo }).eq("id", c.id);
     if (error) return setErro(error.message);
 
     setOk(`Clube ${!c.ativo ? "ativado" : "desativado"} ✅`);
@@ -169,7 +169,7 @@ export default function AdminClubes() {
     setErro(null);
     setOk(null);
 
-    const { error } = await supabase.from("clubes").delete().eq("id", c.id);
+    const { error } = await supabase.from("organizacoes").delete().eq("id", c.id);
     if (error) return setErro(error.message);
 
     setOk("Clube removido ✅");
@@ -206,7 +206,7 @@ export default function AdminClubes() {
                 Voltar
               </button>
               <button className="btn" onClick={novo}>
-                Novo clube
+                Nova organização
               </button>
             </div>
           </div>
@@ -218,11 +218,11 @@ export default function AdminClubes() {
             <div className="panel">
               <div className="panelTitle">Lista</div>
 
-              {clubes.length === 0 ? (
+              {organizacoes.length === 0 ? (
                 <div className="empty">Nenhum clube cadastrado.</div>
               ) : (
                 <div className="list">
-                  {clubes.map((c) => (
+                  {organizacoes.map((c) => (
                     <div key={c.id} className="rowItem">
                       <div>
                         <div className="rowTitle">
