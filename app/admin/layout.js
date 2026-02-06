@@ -18,6 +18,7 @@ const MENU = [
     grupo: "Consulta",
     itens: [
       { label: "Pedidos", href: "/admin/pedidos" },
+      { label: "Delivery / Retirada", href: "/admin/delivery" },
       { label: "Conciliação PIX", href: "/admin/pagamentos" },
       { label: "Histórico PIX", href: "/admin/pagamentos/historico" },
     ],
