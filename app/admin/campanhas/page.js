@@ -21,6 +21,7 @@ export default function AdminCampanhas() {
     data_inicio: "",
     data_fim: "",
     preco_base: 0,
+    custo_pizza: 0, // ✅ NOVO: custo de produção unitário
     identificador_centavos: 0.01,
     ativa: false,
   });
@@ -60,7 +61,9 @@ export default function AdminCampanhas() {
     // campanhas
     const { data: campData, error: campError } = await supabase
       .from("campanhas")
-      .select("id, organizacao_id, nome, data_inicio, data_fim, preco_base, identificador_centavos, ativa, criado_em")
+      .select(
+        "id, organizacao_id, nome, data_inicio, data_fim, preco_base, custo_pizza, identificador_centavos, ativa, criado_em"
+      )
       .order("criado_em", { ascending: false });
 
     if (campError) {
@@ -98,11 +101,12 @@ export default function AdminCampanhas() {
     setOk(null);
     setEditando(null);
     setForm({
-      organizacao_id: (organizacoes?.[0]?.id) || "",
+      organizacao_id: organizacoes?.[0]?.id || "",
       nome: "",
       data_inicio: "",
       data_fim: "",
       preco_base: 0,
+      custo_pizza: 0, // ✅ NOVO
       identificador_centavos: 0.01,
       ativa: false,
     });
@@ -118,6 +122,7 @@ export default function AdminCampanhas() {
       data_inicio: c.data_inicio || "",
       data_fim: c.data_fim || "",
       preco_base: Number(c.preco_base || 0),
+      custo_pizza: Number(c.custo_pizza || 0), // ✅ NOVO
       identificador_centavos: Number(c.identificador_centavos ?? 0.01),
       ativa: !!c.ativa,
     });
@@ -136,6 +141,9 @@ export default function AdminCampanhas() {
     const valorPizza = Number(form.preco_base);
     if (!Number.isFinite(valorPizza) || valorPizza <= 0) return setErro("Valor da pizza deve ser maior que zero.");
 
+    const custoPizza = Number(form.custo_pizza);
+    if (!Number.isFinite(custoPizza) || custoPizza < 0) return setErro("Custo da pizza deve ser zero ou maior.");
+
     const identificador = Number(form.identificador_centavos);
     if (!Number.isFinite(identificador) || identificador < 0 || identificador >= 1)
       return setErro("Identificador (centavos) deve ser entre 0,00 e 0,99.");
@@ -146,6 +154,7 @@ export default function AdminCampanhas() {
       data_inicio: form.data_inicio,
       data_fim: form.data_fim,
       preco_base: Math.round(valorPizza * 100) / 100,
+      custo_pizza: Math.round(custoPizza * 100) / 100, // ✅ NOVO
       identificador_centavos: Math.round(identificador * 100) / 100,
       ativa: !!form.ativa,
     };
@@ -267,11 +276,14 @@ export default function AdminCampanhas() {
                     <div key={c.id} className="rowItem">
                       <div>
                         <div className="rowTitle">
-                          {c.nome} {c.ativa ? <span className="pill ok">ATIVA</span> : <span className="pill">inativa</span>}
+                          {c.nome}{" "}
+                          {c.ativa ? <span className="pill ok">ATIVA</span> : <span className="pill">inativa</span>}
                         </div>
                         <div className="rowSub">
                           Organização: <strong>{organizacoesMap.get(c.organizacao_id) || "—"}</strong> •{" "}
-                          {fmtData(c.data_inicio)} → {fmtData(c.data_fim)} • R$ {Number(c.preco_base).toFixed(2)} • ID:{" "}
+                          {fmtData(c.data_inicio)} → {fmtData(c.data_fim)} • Venda: R$ {Number(c.preco_base).toFixed(2)} •
+                          Custo: R$ {Number(c.custo_pizza || 0).toFixed(2)} • Margem: R${" "}
+                          {(Number(c.preco_base || 0) - Number(c.custo_pizza || 0)).toFixed(2)} • ID:{" "}
                           {Number(c.identificador_centavos ?? 0.01).toFixed(2)}
                         </div>
                       </div>
@@ -328,18 +340,21 @@ export default function AdminCampanhas() {
                     <input type="number" step="0.01" name="preco_base" value={form.preco_base} onChange={onChange} />
                   </div>
                   <div>
-                    <label>Identificador (centavos)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="0.99"
-                      name="identificador_centavos"
-                      value={form.identificador_centavos}
-                      onChange={onChange}
-                    />
+                    <label>Custo da pizza (R$)</label>
+                    <input type="number" step="0.01" name="custo_pizza" value={form.custo_pizza} onChange={onChange} />
                   </div>
                 </div>
+
+                <label>Identificador (centavos)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="0.99"
+                  name="identificador_centavos"
+                  value={form.identificador_centavos}
+                  onChange={onChange}
+                />
 
                 <label className="check">
                   <input type="checkbox" name="ativa" checked={form.ativa} onChange={onChange} />
@@ -383,13 +398,18 @@ function Style() {
         --primary: #2563eb;
         --primary2: #1d4ed8;
       }
-      * { box-sizing: border-box; }
-      body { margin: 0; color: var(--text); }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--text);
+      }
       .bg {
         min-height: 100vh;
         background: radial-gradient(1200px 600px at 20% 10%, rgba(37, 99, 235, 0.45), transparent 60%),
-                    radial-gradient(1000px 500px at 90% 30%, rgba(245, 158, 11, 0.35), transparent 60%),
-                    linear-gradient(180deg, #0b1220, #0f172a 60%, #0b1220);
+          radial-gradient(1000px 500px at 90% 30%, rgba(245, 158, 11, 0.35), transparent 60%),
+          linear-gradient(180deg, #0b1220, #0f172a 60%, #0b1220);
         padding: 28px 16px;
         display: grid;
         place-items: center;
@@ -400,55 +420,111 @@ function Style() {
         background: var(--card);
         border: 1px solid rgba(255, 255, 255, 0.35);
         border-radius: 18px;
-        box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
         padding: 22px;
         backdrop-filter: blur(10px);
       }
-      .top { display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; margin-bottom: 14px; }
-      .topRight { display:flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-      h1 { margin: 0; font-size: 22px; }
-      .muted { color: var(--muted); font-size: 13px; margin: 6px 0 0 0; }
+      .top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .topRight {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 6px 0 0 0;
+      }
 
-      .grid { display:grid; grid-template-columns: 1.1fr 0.9fr; gap: 12px; margin-top: 12px; }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
       .panel {
-        border: 1px solid rgba(15,23,42,0.12);
-        background: rgba(255,255,255,0.78);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: rgba(255, 255, 255, 0.78);
         border-radius: 16px;
         padding: 14px;
       }
-      .panelTitle { font-weight: 900; margin-bottom: 10px; }
+      .panelTitle {
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
 
-      .list { display:flex; flex-direction:column; gap: 10px; }
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
       .rowItem {
-        display:flex; align-items:flex-start; justify-content:space-between; gap: 12px;
-        border: 1px solid rgba(15,23,42,0.10);
-        background: rgba(255,255,255,0.9);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        background: rgba(255, 255, 255, 0.9);
         border-radius: 14px;
         padding: 12px;
       }
-      .rowTitle { font-weight: 900; display:flex; align-items:center; gap: 8px; }
-      .rowSub { margin-top: 6px; color: var(--muted); font-size: 12px; }
-      .rowBtns { display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+      .rowTitle {
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .rowSub {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .rowBtns {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
 
       .pill {
         font-size: 11px;
         border-radius: 999px;
         padding: 4px 8px;
-        border: 1px solid rgba(15,23,42,0.12);
-        background: rgba(15,23,42,0.05);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: rgba(15, 23, 42, 0.05);
       }
       .pill.ok {
-        border-color: rgba(34,197,94,0.22);
-        background: rgba(34,197,94,0.12);
+        border-color: rgba(34, 197, 94, 0.22);
+        background: rgba(34, 197, 94, 0.12);
         color: #14532d;
       }
 
-      .form { display:flex; flex-direction:column; gap: 10px; }
-      label { font-size: 12px; color: var(--muted); }
-      input, select {
+      .form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input,
+      select {
         width: 100%;
         border: 1px solid var(--line);
-        background: rgba(255,255,255,0.9);
+        background: rgba(255, 255, 255, 0.9);
         border-radius: 12px;
         padding: 12px;
         font-size: 14px;
@@ -457,9 +533,18 @@ function Style() {
         -webkit-text-fill-color: #0f172a;
         caret-color: #0f172a;
       }
-      .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .grid2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
 
-      .check { display:flex; align-items:center; gap: 10px; user-select:none; }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        user-select: none;
+      }
 
       .btn {
         background: linear-gradient(180deg, var(--primary), var(--primary2));
@@ -471,18 +556,18 @@ function Style() {
         cursor: pointer;
       }
       .btnLight {
-        background: rgba(15,23,42,0.06);
+        background: rgba(15, 23, 42, 0.06);
         color: #0f172a;
-        border: 1px solid rgba(15,23,42,0.12);
+        border: 1px solid rgba(15, 23, 42, 0.12);
         padding: 10px 12px;
         border-radius: 12px;
         font-weight: 900;
         cursor: pointer;
       }
       .btnMini {
-        background: rgba(15,23,42,0.06);
+        background: rgba(15, 23, 42, 0.06);
         color: #0f172a;
-        border: 1px solid rgba(15,23,42,0.12);
+        border: 1px solid rgba(15, 23, 42, 0.12);
         padding: 8px 10px;
         border-radius: 12px;
         font-weight: 900;
@@ -491,36 +576,50 @@ function Style() {
       }
       .btnMini.danger {
         border-color: rgba(239, 68, 68, 0.25);
-        background: rgba(239, 68, 68, 0.10);
+        background: rgba(239, 68, 68, 0.1);
         color: #7f1d1d;
       }
 
       .alert {
         border-radius: 12px;
         padding: 10px 12px;
-        border: 1px solid rgba(15,23,42,0.12);
+        border: 1px solid rgba(15, 23, 42, 0.12);
         margin: 10px 0;
         font-size: 13px;
       }
-      .alert.warn { background: rgba(245, 158, 11, 0.16); border-color: rgba(245,158,11,0.35); }
-      .alert.ok { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.22); }
+      .alert.warn {
+        background: rgba(245, 158, 11, 0.16);
+        border-color: rgba(245, 158, 11, 0.35);
+      }
+      .alert.ok {
+        background: rgba(34, 197, 94, 0.12);
+        border-color: rgba(34, 197, 94, 0.22);
+      }
 
       .note {
         margin-top: 8px;
         font-size: 12px;
         color: var(--muted);
-        background: rgba(15,23,42,0.04);
-        border: 1px solid rgba(15,23,42,0.08);
+        background: rgba(15, 23, 42, 0.04);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         padding: 10px 12px;
         border-radius: 12px;
       }
-      .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+        padding: 10px 0;
+      }
 
       @media (max-width: 920px) {
-        .grid { grid-template-columns: 1fr; }
+        .grid {
+          grid-template-columns: 1fr;
+        }
       }
       @media (max-width: 520px) {
-        .grid2 { grid-template-columns: 1fr; }
+        .grid2 {
+          grid-template-columns: 1fr;
+        }
       }
     `}</style>
   );

@@ -101,15 +101,22 @@ export default function Page() {
     }
 
     setCampanha(campanhaData);
-    setOrganizacao(campanhaData.organizacoes || null);
 
-    // ✅ NOVO: carregar itens via tabela de relacionamento (itens_campanha) + join em itens
+    // ✅ garante organizacao como objeto (às vezes vem array)
+    const org = Array.isArray(campanhaData.organizacoes)
+      ? campanhaData.organizacoes[0]
+      : campanhaData.organizacoes;
+
+    setOrganizacao(org || null);
+
+    // ✅ carregar itens via itens_campanha + join itens + preco
     const { data: itensData, error: itensError } = await supabase
       .from("itens_campanha")
       .select(
         `
         ordem,
         item_id,
+        preco,
         itens ( id, nome )
       `
       )
@@ -128,7 +135,7 @@ export default function Page() {
       return;
     }
 
-    // ✅ Normaliza para o formato esperado no frontend: {id, nome, ordem}
+    // ✅ Normaliza para o formato esperado no frontend: {id, nome, ordem, preco}
     const itensNormalizados = (itensData || [])
       .map((r) => {
         const item = Array.isArray(r.itens) ? r.itens[0] : r.itens; // segurança
@@ -136,6 +143,7 @@ export default function Page() {
           id: item?.id ?? r.item_id,
           nome: item?.nome ?? "",
           ordem: r.ordem ?? 999,
+          preco: Number(r.preco ?? 0),
         };
       })
       .filter((x) => x.id && x.nome); // remove inválidos
@@ -190,10 +198,19 @@ export default function Page() {
     return Number.isFinite(v) ? v : 0;
   }, [campanha]);
 
+  // ✅ NOVO: base = soma(qtd * preco do item)
   const valorBase = useMemo(() => {
     if (!campanha) return 0;
-    return Number(form.quantidade) * Number(campanha.preco_base);
-  }, [form.quantidade, campanha]);
+
+    const mapaPreco = new Map(itens.map((i) => [i.id, Number(i.preco ?? 0)]));
+
+    const soma = Object.entries(itensSelecionados).reduce((t, [itemId, qtd]) => {
+      const p = mapaPreco.get(itemId) ?? 0;
+      return t + Number(qtd || 0) * Number(p || 0);
+    }, 0);
+
+    return Number(soma.toFixed(2));
+  }, [campanha, itens, itensSelecionados]);
 
   // ✅ total final = base + identificador (ex.: +0,01)
   const valorTotal = useMemo(() => {
@@ -201,13 +218,16 @@ export default function Page() {
   }, [valorBase, identificadorCentavos]);
 
   const resumoItens = useMemo(() => {
-    const mapa = new Map(itens.map((s) => [s.id, s.nome]));
+    const mapaNome = new Map(itens.map((s) => [s.id, s.nome]));
+    const mapaPreco = new Map(itens.map((s) => [s.id, Number(s.preco ?? 0)]));
+
     return Object.entries(itensSelecionados)
       .filter(([_, qtd]) => Number(qtd) > 0)
       .map(([itemId, qtd]) => ({
         item_id: itemId,
-        nome: mapa.get(itemId) || "Item",
+        nome: mapaNome.get(itemId) || "Item",
         quantidade: Number(qtd),
+        preco: mapaPreco.get(itemId) ?? 0,
       }));
   }, [itens, itensSelecionados]);
 
@@ -417,9 +437,7 @@ export default function Page() {
 
               <div className="miniBreakdown">
                 <div className="miniRow">
-                  <span>
-                    Base ({form.quantidade} x R$ {Number(campanha.preco_base).toFixed(2)})
-                  </span>
+                  <span>Base (itens x preço)</span>
                   <strong>R$ {Number(pedidoCriado.valorBase).toFixed(2)}</strong>
                 </div>
                 <div className="miniRow">
@@ -498,9 +516,7 @@ export default function Page() {
               <div className="logo">🍕</div>
               <div>
                 <h1>PedeSim</h1>
-                <p className="sub">
-                  {campanha.nome} • R$ {Number(campanha.preco_base).toFixed(2)} / pizza
-                </p>
+                <p className="sub">{campanha.nome} • preço por item</p>
               </div>
               <div className="tag">Amigos do Paraíso</div>
             </div>
@@ -576,7 +592,10 @@ export default function Page() {
 
                   return (
                     <div key={id} className="flavorCard">
-                      <div className="flavorName">{s.nome}</div>
+                      <div>
+                        <div className="flavorName">{s.nome}</div>
+                        <div className="small muted">R$ {Number(s.preco || 0).toFixed(2)}</div>
+                      </div>
                       <div className="stepper">
                         <button type="button" className="iconBtn" onClick={() => decItem(id)}>
                           –

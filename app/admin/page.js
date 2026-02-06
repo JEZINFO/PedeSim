@@ -14,14 +14,15 @@ const CARDS = [
     titulo: "Cadastro",
     itens: [
       { label: "Clubes", desc: "Chaves PIX e dados do clube", href: "/admin/clubes" },
-      { label: "Campanhas", desc: "Ativar campanha, valores e período", href: "/admin/campanhas" },
-      { label: "Sabores", desc: "Itens do cardápio por campanha", href: "/admin/sabores" },
+      { label: "Campanhas", desc: "Ativar campanha, período e identificador", href: "/admin/campanhas" },
+      { label: "Itens (Catálogo)", desc: "Cadastrar itens globais (nome/ativo)", href: "/admin/itens" },
+      { label: "Campanhas • Itens", desc: "Vincular itens na campanha (preço/ordem/ativo)", href: "/admin/campanhas-itens" },
     ],
   },
   {
     titulo: "Relatórios",
     itens: [
-      { label: "Produção por Sabor", desc: "Totais para produção/fornecedor", href: "/admin/relatorios/producao" },
+      { label: "Produção por Item", desc: "Totais para produção/fornecedor", href: "/admin/relatorios/producao" },
       { label: "Histórico PIX", desc: "Auditoria e exportação", href: "/admin/pagamentos/historico" },
     ],
   },

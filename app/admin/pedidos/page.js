@@ -155,6 +155,7 @@ export default function AdminPedidos() {
       .from("pedidos")
       .select("id, codigo_pedido, nome_comprador, whatsapp, nome_referencia, quantidade, valor_total, status, criado_em, campanha_id")
       .eq("campanha_id", campanha_id)
+      .neq("status", "excluido")
       .order("criado_em", { ascending: false })
       .limit(500);
 
@@ -173,58 +174,98 @@ export default function AdminPedidos() {
   }
 
   async function carregarItens(pedidoIds) {
-    if (!pedidoIds || pedidoIds.length === 0) {
-      setItensPorPedido({});
-      return;
-    }
-
-    // Join sabores (quando PostgREST reconhecer)
-    const tentativa = await supabase
-      .from("pedido_itens")
-      .select("pedido_id, quantidade, itens ( nome )")
-      .in("pedido_id", pedidoIds);
-
-    if (!tentativa.error && tentativa.data) {
-      const mapa = {};
-      for (const row of tentativa.data) {
-        const nome = row?.sabores?.nome || "Item";
-        if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
-        mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
-      }
-      setItensPorPedido(mapa);
-      return;
-    }
-
-    // Fallback
-    const { data: ps, error: psErr } = await supabase
-      .from("pedido_itens")
-      .select("pedido_id, item_id, quantidade")
-      .in("pedido_id", pedidoIds);
-
-    if (psErr) {
-      console.error(psErr);
-      setItensPorPedido({});
-      return;
-    }
-
-    const saborIds = Array.from(new Set((ps || []).map((r) => r.item_id).filter(Boolean)));
-    const { data: sab, error: sErr } = await supabase.from("itens").select("id, nome").in("id", saborIds);
-
-    if (sErr) {
-      console.error(sErr);
-      setItensPorPedido({});
-      return;
-    }
-
-    const itemMap = new Map((sab || []).map((s) => [s.id, s.nome]));
-    const mapa = {};
-    for (const row of ps || []) {
-      const nome = itemMap.get(row.item_id) || "Item";
-      if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
-      mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
-    }
-    setItensPorPedido(mapa);
+  if (!pedidoIds || pedidoIds.length === 0) {
+    setItensPorPedido({});
+    return;
   }
+
+  // 1) tenta join direto pedido_itens -> itens (nome)
+  const { data: joinData, error: joinErr } = await supabase
+    .from("pedido_itens")
+    .select("pedido_id, item_id, quantidade, itens ( id, nome )")
+    .in("pedido_id", pedidoIds);
+
+  // se vier algo, tenta montar mapa
+  if (!joinErr && Array.isArray(joinData)) {
+    // coleta nomes vindos do join (pode vir como objeto ou array)
+    const mapa = {};
+    const faltandoItemIds = new Set();
+
+    for (const row of joinData) {
+      const itensJoin = row?.itens;
+      const itemObj = Array.isArray(itensJoin) ? itensJoin[0] : itensJoin;
+
+      const nome = itemObj?.nome || "";
+      if (!nome) {
+        if (row?.item_id) faltandoItemIds.add(row.item_id);
+      }
+
+      if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
+      mapa[row.pedido_id].push({
+        item_id: row.item_id,
+        nome: nome || "Item",
+        quantidade: Number(row.quantidade || 0),
+      });
+    }
+
+    // 1b) se teve "Item" por falta de nome, faz lookup em itens
+    if (faltandoItemIds.size > 0) {
+      const ids = Array.from(faltandoItemIds);
+      const { data: itensData, error: itensErr } = await supabase.from("itens").select("id, nome").in("id", ids);
+
+      if (!itensErr && Array.isArray(itensData)) {
+        const itemMap = new Map(itensData.map((i) => [i.id, i.nome]));
+        // reescreve nomes
+        for (const pid of Object.keys(mapa)) {
+          mapa[pid] = mapa[pid].map((x) => ({
+            ...x,
+            nome: x.nome === "Item" ? itemMap.get(x.item_id) || "Item" : x.nome,
+          }));
+        }
+      }
+    }
+
+    // remove item_id do UI (opcional) e mantém só nome/quantidade
+    const mapaFinal = {};
+    for (const pid of Object.keys(mapa)) {
+      mapaFinal[pid] = mapa[pid].map((x) => ({ nome: x.nome, quantidade: x.quantidade }));
+    }
+
+    setItensPorPedido(mapaFinal);
+    return;
+  }
+
+  // 2) fallback total: busca sem join e depois nomes
+  const { data: ps, error: psErr } = await supabase
+    .from("pedido_itens")
+    .select("pedido_id, item_id, quantidade")
+    .in("pedido_id", pedidoIds);
+
+  if (psErr || !Array.isArray(ps)) {
+    console.error(psErr);
+    setItensPorPedido({});
+    return;
+  }
+
+  const itemIds = Array.from(new Set(ps.map((r) => r.item_id).filter(Boolean)));
+  const { data: items, error: sErr } = await supabase.from("itens").select("id, nome").in("id", itemIds);
+
+  if (sErr || !Array.isArray(items)) {
+    console.error(sErr);
+    setItensPorPedido({});
+    return;
+  }
+
+  const itemMap = new Map(items.map((s) => [s.id, s.nome]));
+  const mapa = {};
+  for (const row of ps) {
+    const nome = itemMap.get(row.item_id) || "Item";
+    if (!mapa[row.pedido_id]) mapa[row.pedido_id] = [];
+    mapa[row.pedido_id].push({ nome, quantidade: Number(row.quantidade || 0) });
+  }
+  setItensPorPedido(mapa);
+}
+
 
   async function trocarOrganizacao(id) {
     setOrganizacaoId(id);
@@ -238,9 +279,10 @@ export default function AdminPedidos() {
 
   const pedidosFiltrados = useMemo(() => {
     const q = String(busca || "").trim().toLowerCase();
-    if (!q) return pedidos;
+    if (!q) return pedidos.filter((p) => String(p?.status || "").toLowerCase() !== "excluido");
 
     return pedidos.filter((p) => {
+      if (String(p?.status || "").toLowerCase() === "excluido") return false;
       const codigo = String(p.codigo_pedido || "").toLowerCase();
       const nome = String(p.nome_comprador || "").toLowerCase();
       const tel = String(p.whatsapp || "").toLowerCase();
@@ -284,6 +326,35 @@ export default function AdminPedidos() {
     setPedidos((prev) => prev.map((p) => (p.id === pedido.id ? { ...p, status: novoStatus } : p)));
     setDetalhe((prev) => (prev?.id === pedido.id ? { ...prev, status: novoStatus } : prev));
   }
+
+  async function excluirPedido(pedido) {
+    setErro(null);
+    setOk(null);
+
+    const confirmMsg =
+      `Excluir o pedido ${pedido.codigo_pedido || ""}?\n` +
+      `Ele NÃO será apagado do banco; apenas ficará com status = "excluido" e não aparecerá na lista.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    const { error } = await supabase
+      .from("pedidos")
+      .update({ status: "excluido" })
+      .eq("id", pedido.id);
+
+    if (error) {
+      console.error(error);
+      setErro(error.message || "Erro ao excluir pedido.");
+      return;
+    }
+
+    setOk(`Pedido excluído: ${pedido.codigo_pedido || "pedido"} ✅`);
+
+    // Remove da lista imediatamente
+    setPedidos((prev) => prev.filter((p) => p.id !== pedido.id));
+    setDetalhe(null);
+  }
+
 
   function exportarCSV() {
     const linhas = [];
@@ -375,7 +446,7 @@ export default function AdminPedidos() {
             <div>
               <label>Organização</label>
               <select value={organizacaoId} onChange={(e) => trocarOrganizacao(e.target.value)}>
-                {organizações.map((c) => (
+                {organizacoes.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nome} {c.ativo ? "" : "(inativo)"}
                   </option>
@@ -524,6 +595,9 @@ export default function AdminPedidos() {
                   </button>
                   <button className="btnDanger" type="button" onClick={() => atualizarStatus(detalhe, "cancelado")}>
                     CANCELAR
+                  </button>
+                  <button className="btnDanger" type="button" onClick={() => excluirPedido(detalhe)}>
+                    EXCLUIR
                   </button>
                 </div>
 
@@ -704,43 +778,72 @@ function Style() {
       .pill.bad { border-color: rgba(239,68,68,0.22); background: rgba(239,68,68,0.10); color: #7f1d1d; }
 
       .btn {
-        background: linear-gradient(180deg, var(--primary), var(--primary2));
-        color: white;
-        border: none;
-        padding: 12px 14px;
-        border-radius: 12px;
-        font-weight: 900;
-        cursor: pointer;
-        min-width: 160px;
-      }
-      .btnLight {
-        background: rgba(15,23,42,0.06);
-        color: #0f172a;
-        border: 1px solid rgba(15,23,42,0.12);
-        padding: 10px 12px;
-        border-radius: 12px;
-        font-weight: 900;
-        cursor: pointer;
-      }
+  background: linear-gradient(180deg, var(--primary), var(--primary2));
+  color: #fff;
+  border: 1px solid rgba(37, 99, 235, 0.55);
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  min-width: 160px;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px rgba(37, 99, 235, 0.22);
+}
+.btn:active {
+  transform: translateY(0px);
+  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.18);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ✅ Botão secundário com contraste real */
+.btnLight {
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.06);
+}
+
       .btnDanger {
-        background: rgba(239, 68, 68, 0.12);
-        color: #7f1d1d;
-        border: 1px solid rgba(239, 68, 68, 0.22);
-        padding: 10px 12px;
-        border-radius: 12px;
-        font-weight: 900;
-        cursor: pointer;
-      }
-      .btnMini {
-        background: rgba(15,23,42,0.06);
-        color: #0f172a;
-        border: 1px solid rgba(15,23,42,0.12);
-        padding: 8px 10px;
-        border-radius: 12px;
-        font-weight: 900;
-        cursor: pointer;
-        font-size: 12px;
-      }
+  background: rgba(239, 68, 68, 0.12);
+  color: #7f1d1d;
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  box-shadow: 0 10px 18px rgba(239, 68, 68, 0.08);
+  white-space: nowrap;
+}
+.btnDanger:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(239, 68, 68, 0.12); }
+.btnDanger:active { transform: translateY(0px); }
+.btnDanger:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.btnLight:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.09);
+}
+.btnLight:active {
+  transform: translateY(0px);
+}
+.btnLight:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 
       .alert { border-radius: 12px; padding: 10px 12px; border: 1px solid rgba(15,23,42,0.12); margin: 10px 0; font-size: 13px; }
       .alert.warn { background: rgba(245, 158, 11, 0.16); border-color: rgba(245,158,11,0.35); }
@@ -795,6 +898,35 @@ function Style() {
         .actions { justify-content: stretch; }
         .btn { min-width: 100%; }
       }
-    `}</style>
+    
+
+/* FIX btnDanger: garantir visibilidade */
+.btnDanger{
+  background:#dc2626 !important;
+  color:#ffffff !important;
+  border:1px solid #b91c1c !important;
+}
+.btnDanger:hover{
+  background:#b91c1c !important;
+}
+
+
+/* ✅ FIX: botões sempre visíveis (evita ficar transparente por efeitos de glass/blur) */
+.btnLight{
+  background: rgba(255,255,255,0.92) !important;
+  border: 1px solid rgba(15,23,42,0.16) !important;
+  color: #0f172a !important;
+}
+.btn{
+  color: #ffffff !important;
+}
+.btnDanger{
+  background:#dc2626 !important;
+  color:#ffffff !important;
+  border:1px solid #b91c1c !important;
+}
+.btnDanger:hover{ background:#b91c1c !important; }
+
+`}</style>
   );
 }

@@ -10,7 +10,8 @@ const MENU = [
     itens: [
       { label: "Clubes", href: "/admin/clubes" },
       { label: "Campanhas", href: "/admin/campanhas" },
-      { label: "Sabores", href: "/admin/sabores" },
+      { label: "Catálogo", href: "/admin/itens" },
+      { label: "Campanhas • Itens", href: "/admin/campanhas-itens" },
     ],
   },
   {
@@ -23,13 +24,14 @@ const MENU = [
   },
   {
     grupo: "Relatórios",
-    itens: [{ label: "Produção por Sabor", href: "/admin/relatorios/producao" }],
+    itens: [{ label: "Produção por Item", href: "/admin/relatorios/producao" }],
   },
   {
     grupo: "Atalhos",
     itens: [{ label: "Página Pública", href: "/" }],
   },
 ];
+
 
 function findActive(pathname) {
   // pega o match mais específico (href mais longo) para rotas aninhadas
