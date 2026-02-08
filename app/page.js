@@ -30,12 +30,27 @@ function formatBRPhone(digits) {
   return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
 }
 
+function sanitizeCampaignCode(v) {
+  // mantém letras/números/_/- e remove espaços
+  return String(v ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .slice(0, 32);
+}
+
 export default function Page() {
   const [campanha, setCampanha] = useState(null);
   const [organizacao, setOrganizacao] = useState(null);
   const [itens, setItens] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
+
+  // 🔑 NOVO: código de acesso da campanha
+  const [codigoCampanha, setCodigoCampanha] = useState("");
+  const [codigoConfirmado, setCodigoConfirmado] = useState(false);
 
   const [enviando, setEnviando] = useState(false);
   const [pedidoCriado, setPedidoCriado] = useState(null);
@@ -50,14 +65,40 @@ export default function Page() {
   const [itensSelecionados, setItensSelecionados] = useState({});
 
   useEffect(() => {
-    carregarDados();
+    // ✅ Suporta deep link: ?c=SEUCODIGO
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const c = params.get("c") || params.get("codigo") || params.get("campanha");
+      const cod = sanitizeCampaignCode(c);
+      if (cod) {
+        setCodigoCampanha(cod);
+        // carrega direto
+        carregarDadosPorCodigo(cod);
+      } else {
+        // sem código → mostra tela de acesso
+        setLoading(false);
+        setCodigoConfirmado(false);
+      }
+    } catch {
+      setLoading(false);
+      setCodigoConfirmado(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function carregarDados() {
+  async function carregarDadosPorCodigo(codigo) {
+    const cod = sanitizeCampaignCode(codigo);
     setLoading(true);
     setErro(null);
 
+    if (!cod) {
+      setErro("Informe o código da campanha.");
+      setLoading(false);
+      setCodigoConfirmado(false);
+      return;
+    }
+
+    // 1️⃣ Buscar campanha por código
     const { data: campanhaData, error: campanhaError } = await supabase
       .from("campanhas")
       .select(
@@ -69,6 +110,9 @@ export default function Page() {
         data_inicio,
         data_fim,
         identificador_centavos,
+        codigo_acesso,
+        publica,
+        ativa,
         organizacoes (
           id,
           nome,
@@ -80,26 +124,31 @@ export default function Page() {
       `
       )
       .eq("ativa", true)
-      .order("data_inicio", { ascending: false })
+      .eq("publica", true)
+      .ilike("codigo_acesso", cod)
       .limit(1)
       .maybeSingle();
 
+    console.log("codigoCampanha:", cod);
     console.log("campanhaData:", campanhaData);
     console.log("campanhaError:", campanhaError);
 
     if (campanhaError) {
       console.error(campanhaError);
-      setErro("Erro ao carregar campanha.");
+      setErro("Erro ao carregar campanha. Verifique o código.");
       setLoading(false);
+      setCodigoConfirmado(false);
       return;
     }
 
     if (!campanhaData) {
-      setErro("Nenhuma campanha ativa encontrada.");
+      setErro("Código inválido ou campanha indisponível.");
       setLoading(false);
+      setCodigoConfirmado(false);
       return;
     }
 
+    setCodigoConfirmado(true);
     setCampanha(campanhaData);
 
     // ✅ garante organizacao como objeto (às vezes vem array)
@@ -109,7 +158,7 @@ export default function Page() {
 
     setOrganizacao(org || null);
 
-    // ✅ carregar itens via itens_campanha + join itens + preco
+    // 2️⃣ carregar itens via itens_campanha + join itens + preco
     const { data: itensData, error: itensError } = await supabase
       .from("itens_campanha")
       .select(
@@ -151,6 +200,17 @@ export default function Page() {
     console.log("itensNormalizados:", itensNormalizados);
 
     setItens(itensNormalizados);
+    setItensSelecionados({});
+    setPedidoCriado(null);
+
+    // reset parcial do form (mantém limpo ao trocar de campanha)
+    setForm({
+      nome_comprador: "",
+      whatsapp: "",
+      nome_referencia: "",
+      quantidade: 1,
+    });
+
     setLoading(false);
   }
 
@@ -198,7 +258,7 @@ export default function Page() {
     return Number.isFinite(v) ? v : 0;
   }, [campanha]);
 
-  // ✅ NOVO: base = soma(qtd * preco do item)
+  // ✅ base = soma(qtd * preco do item)
   const valorBase = useMemo(() => {
     if (!campanha) return 0;
 
@@ -320,6 +380,26 @@ export default function Page() {
     });
   }
 
+  function voltarAoCodigo() {
+    setPedidoCriado(null);
+    setItensSelecionados({});
+    setItens([]);
+    setCampanha(null);
+    setOrganizacao(null);
+    setErro(null);
+    setCodigoConfirmado(false);
+    setLoading(false);
+
+    // limpa querystring (opcional)
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("c");
+      url.searchParams.delete("codigo");
+      url.searchParams.delete("campanha");
+      window.history.replaceState({}, "", url.toString());
+    } catch {}
+  }
+
   // =========================
   // PIX (copia e cola + QR) - IGUAL AO MODELO QUE FUNCIONOU
   // 59=N, 60=C, sem 010211, GUI BR.GOV.BCB.PIX
@@ -365,6 +445,10 @@ export default function Page() {
     }
   }
 
+  // ==========
+  // TELAS
+  // ==========
+
   if (loading) {
     return (
       <>
@@ -389,6 +473,78 @@ export default function Page() {
     );
   }
 
+  // ✅ NOVO: Tela de acesso por código (quando ainda não carregou campanha)
+  if (!campanha && !codigoConfirmado) {
+    return (
+      <>
+        <div className="bg">
+          <div className="shell">
+            <div className="card">
+              <div className="brand">
+                <div className="logo">🔑</div>
+                <div>
+                  <h1>Acessar campanha</h1>
+                  <p className="sub">Digite o código informado pelo organizador.</p>
+                </div>
+                <div className="tag">PedeSim</div>
+              </div>
+
+              {erro ? (
+                <div className="alert">
+                  <strong>Ops!</strong> {erro}
+                </div>
+              ) : null}
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setErro(null);
+                  const cod = sanitizeCampaignCode(codigoCampanha);
+                  setCodigoCampanha(cod);
+                  carregarDadosPorCodigo(cod);
+
+                  // grava na URL (opcional)
+                  try {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("c", cod);
+                    window.history.replaceState({}, "", url.toString());
+                  } catch {}
+                }}
+              >
+                <label>Código da campanha</label>
+                <input
+                  value={codigoCampanha}
+                  onChange={(e) => setCodigoCampanha(sanitizeCampaignCode(e.target.value))}
+                  placeholder="Ex: AMIGOS2026"
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
+                />
+
+                <div className="footer">
+                  <div className="summary">
+                    <div className="small">Dica</div>
+                    <div className="small muted">Você também pode abrir um link com: ?c=SEUCODIGO</div>
+                  </div>
+
+                  <button className="btn" type="submit">
+                    Acessar
+                  </button>
+                </div>
+              </form>
+
+              <div className="note">
+                Se você não tem o código, solicite ao responsável pela campanha.
+              </div>
+            </div>
+          </div>
+        </div>
+        <Style />
+      </>
+    );
+  }
+
   if (erro) {
     return (
       <>
@@ -398,9 +554,17 @@ export default function Page() {
               <div className="alert">
                 <strong>Ops!</strong> {erro}
               </div>
-              <button className="btn" onClick={carregarDados}>
-                Tentar novamente
-              </button>
+              <div className="footer">
+                <button className="btnLight" onClick={voltarAoCodigo}>
+                  Trocar código
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => carregarDadosPorCodigo(codigoCampanha)}
+                >
+                  Tentar novamente
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -496,9 +660,14 @@ export default function Page() {
                 <strong>{pedidoCriado.pedido.codigo_pedido}</strong>.
               </div>
 
-              <button className="btn" onClick={resetar}>
-                Fazer novo pedido
-              </button>
+              <div className="footer">
+                <button className="btnLight" onClick={voltarAoCodigo}>
+                  Trocar código
+                </button>
+                <button className="btn" onClick={resetar}>
+                  Fazer novo pedido
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -516,9 +685,13 @@ export default function Page() {
               <div className="logo">🍕</div>
               <div>
                 <h1>PedeSim</h1>
-                <p className="sub">{campanha.nome} • preço por item</p>
+                <p className="sub">{campanha?.nome || "Campanha"} • preço por item</p>
               </div>
-              <div className="tag">Amigos do Paraíso</div>
+              <div className="tag">
+                <button type="button" className="linkTag" onClick={voltarAoCodigo}>
+                  Trocar código
+                </button>
+              </div>
             </div>
 
             <form onSubmit={enviarPedido}>
@@ -784,6 +957,16 @@ function Style() {
         padding: 6px 10px;
         border-radius: 999px;
         white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .linkTag {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-weight: 900;
+        color: #0f172a;
       }
 
       label {
