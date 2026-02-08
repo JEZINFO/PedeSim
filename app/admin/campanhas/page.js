@@ -4,6 +4,28 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../src/lib/supabase";
 import { useRouter } from "next/navigation";
 
+function sanitizeCampaignCode(v) {
+  // mantém letras/números/_/- e remove espaços (máx 32)
+  return String(v ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .slice(0, 32);
+}
+
+function makeCodeFromName(nome) {
+  const base = String(nome || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
+    .slice(0, 10);
+
+  const suf = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  return sanitizeCampaignCode(`${base || "CAMP"}${suf}`);
+}
+
 export default function AdminCampanhas() {
   const router = useRouter();
 
@@ -21,8 +43,11 @@ export default function AdminCampanhas() {
     data_inicio: "",
     data_fim: "",
     preco_base: 0,
-    custo_pizza: 0, // ✅ NOVO: custo de produção unitário
+    custo_pizza: 0, // ✅ custo de produção unitário
     identificador_centavos: 0.01,
+    // ✅ NOVO: acesso por código
+    codigo_acesso: "",
+    publica: true,
     ativa: false,
   });
 
@@ -62,7 +87,7 @@ export default function AdminCampanhas() {
     const { data: campData, error: campError } = await supabase
       .from("campanhas")
       .select(
-        "id, organizacao_id, nome, data_inicio, data_fim, preco_base, custo_pizza, identificador_centavos, ativa, criado_em"
+        "id, organizacao_id, nome, data_inicio, data_fim, preco_base, custo_pizza, identificador_centavos, codigo_acesso, publica, ativa, criado_em"
       )
       .order("criado_em", { ascending: false });
 
@@ -90,6 +115,12 @@ export default function AdminCampanhas() {
 
   function onChange(e) {
     const { name, value, type, checked } = e.target;
+
+    if (name === "codigo_acesso") {
+      setForm((p) => ({ ...p, codigo_acesso: sanitizeCampaignCode(value) }));
+      return;
+    }
+
     setForm((p) => ({
       ...p,
       [name]: type === "checkbox" ? checked : value,
@@ -106,8 +137,10 @@ export default function AdminCampanhas() {
       data_inicio: "",
       data_fim: "",
       preco_base: 0,
-      custo_pizza: 0, // ✅ NOVO
+      custo_pizza: 0,
       identificador_centavos: 0.01,
+      codigo_acesso: "",
+      publica: true,
       ativa: false,
     });
   }
@@ -122,8 +155,10 @@ export default function AdminCampanhas() {
       data_inicio: c.data_inicio || "",
       data_fim: c.data_fim || "",
       preco_base: Number(c.preco_base || 0),
-      custo_pizza: Number(c.custo_pizza || 0), // ✅ NOVO
+      custo_pizza: Number(c.custo_pizza || 0),
       identificador_centavos: Number(c.identificador_centavos ?? 0.01),
+      codigo_acesso: sanitizeCampaignCode(c.codigo_acesso || ""),
+      publica: c.publica !== false, // default true
       ativa: !!c.ativa,
     });
   }
@@ -148,14 +183,21 @@ export default function AdminCampanhas() {
     if (!Number.isFinite(identificador) || identificador < 0 || identificador >= 1)
       return setErro("Identificador (centavos) deve ser entre 0,00 e 0,99.");
 
+    // ✅ NOVO: valida código
+    const codigo = sanitizeCampaignCode(form.codigo_acesso);
+    if (!codigo || codigo.length < 3) return setErro("Informe um código de acesso (mín. 3 caracteres).");
+
     const payload = {
       organizacao_id: form.organizacao_id,
       nome: String(form.nome).trim(),
       data_inicio: form.data_inicio,
       data_fim: form.data_fim,
       preco_base: Math.round(valorPizza * 100) / 100,
-      custo_pizza: Math.round(custoPizza * 100) / 100, // ✅ NOVO
+      custo_pizza: Math.round(custoPizza * 100) / 100,
       identificador_centavos: Math.round(identificador * 100) / 100,
+      // ✅ NOVO
+      codigo_acesso: codigo,
+      publica: !!form.publica,
       ativa: !!form.ativa,
     };
 
@@ -176,6 +218,10 @@ export default function AdminCampanhas() {
       const { error } = await supabase.from("campanhas").insert(payload);
       if (error) {
         console.error(error);
+        // dica amigável para conflito de código único
+        if ((error.message || "").toLowerCase().includes("duplicate")) {
+          return setErro("Esse código de acesso já existe. Escolha outro.");
+        }
         return setErro(error.message);
       }
       setOk("Campanha criada ✅");
@@ -187,6 +233,9 @@ export default function AdminCampanhas() {
     const { error } = await supabase.from("campanhas").update(payload).eq("id", editando);
     if (error) {
       console.error(error);
+      if ((error.message || "").toLowerCase().includes("duplicate")) {
+        return setErro("Esse código de acesso já existe. Escolha outro.");
+      }
       return setErro(error.message);
     }
 
@@ -226,6 +275,23 @@ export default function AdminCampanhas() {
     setOk("Campanha removida ✅");
     await carregarTudo();
     if (editando === c.id) novo();
+  }
+
+  async function copiarLinkPublico(c) {
+    try {
+      const base = window.location.origin;
+      const cod = sanitizeCampaignCode(c.codigo_acesso || "");
+      if (!cod) {
+        alert("Campanha sem código. Edite e salve um código primeiro.");
+        return;
+      }
+      const url = `${base}/?c=${cod}`;
+      await navigator.clipboard.writeText(url);
+      setOk("Link copiado ✅");
+      setTimeout(() => setOk(null), 1800);
+    } catch {
+      alert("Não consegui copiar automaticamente.");
+    }
   }
 
   if (loading) {
@@ -278,6 +344,7 @@ export default function AdminCampanhas() {
                         <div className="rowTitle">
                           {c.nome}{" "}
                           {c.ativa ? <span className="pill ok">ATIVA</span> : <span className="pill">inativa</span>}
+                          {c.publica !== false ? <span className="pill pub">PÚBLICA</span> : <span className="pill">privada</span>}
                         </div>
                         <div className="rowSub">
                           Organização: <strong>{organizacoesMap.get(c.organizacao_id) || "—"}</strong> •{" "}
@@ -285,9 +352,14 @@ export default function AdminCampanhas() {
                           Custo: R$ {Number(c.custo_pizza || 0).toFixed(2)} • Margem: R${" "}
                           {(Number(c.preco_base || 0) - Number(c.custo_pizza || 0)).toFixed(2)} • ID:{" "}
                           {Number(c.identificador_centavos ?? 0.01).toFixed(2)}
+                          <br />
+                          Código: <strong className="mono">{c.codigo_acesso || "—"}</strong>
                         </div>
                       </div>
                       <div className="rowBtns">
+                        <button className="btnMini" onClick={() => copiarLinkPublico(c)}>
+                          Copiar link
+                        </button>
                         {!c.ativa ? (
                           <button className="btnMini" onClick={() => ativarRapido(c)}>
                             Ativar
@@ -356,6 +428,40 @@ export default function AdminCampanhas() {
                   onChange={onChange}
                 />
 
+                {/* ✅ NOVO: Código da campanha */}
+                <div className="codeRow">
+                  <div>
+                    <label>Código de acesso</label>
+                    <input
+                      name="codigo_acesso"
+                      value={form.codigo_acesso}
+                      onChange={onChange}
+                      placeholder="Ex: AMIGOS2026"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <div className="help">
+                      Esse código será usado na home: <strong className="mono">/?c=SEUCODIGO</strong>
+                    </div>
+                  </div>
+                  <div className="codeActions">
+                    <label>&nbsp;</label>
+                    <button
+                      type="button"
+                      className="btnMini"
+                      onClick={() => setForm((p) => ({ ...p, codigo_acesso: makeCodeFromName(p.nome) }))}
+                    >
+                      Gerar
+                    </button>
+                  </div>
+                </div>
+
+                <label className="check">
+                  <input type="checkbox" name="publica" checked={form.publica} onChange={onChange} />
+                  Campanha pública (pode acessar via código)
+                </label>
+
                 <label className="check">
                   <input type="checkbox" name="ativa" checked={form.ativa} onChange={onChange} />
                   Marcar como ativa (desativa as outras do mesmo organização)
@@ -366,7 +472,7 @@ export default function AdminCampanhas() {
                 </button>
 
                 <div className="note">
-                  Dica: deixe <strong>apenas 1 campanha ativa</strong> para a página pública puxar automaticamente.
+                  Dica: com o novo fluxo por código, você pode manter várias campanhas e distribuir apenas o link/código de cada uma.
                 </div>
               </form>
             </div>
@@ -484,6 +590,7 @@ function Style() {
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
       }
       .rowSub {
         margin-top: 6px;
@@ -504,11 +611,17 @@ function Style() {
         padding: 4px 8px;
         border: 1px solid rgba(15, 23, 42, 0.12);
         background: rgba(15, 23, 42, 0.05);
+        white-space: nowrap;
       }
       .pill.ok {
         border-color: rgba(34, 197, 94, 0.22);
         background: rgba(34, 197, 94, 0.12);
         color: #14532d;
+      }
+      .pill.pub {
+        border-color: rgba(37, 99, 235, 0.22);
+        background: rgba(37, 99, 235, 0.12);
+        color: #0b2a6f;
       }
 
       .form {
@@ -573,6 +686,7 @@ function Style() {
         font-weight: 900;
         cursor: pointer;
         font-size: 12px;
+        white-space: nowrap;
       }
       .btnMini.danger {
         border-color: rgba(239, 68, 68, 0.25);
@@ -611,6 +725,27 @@ function Style() {
         padding: 10px 0;
       }
 
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      .codeRow {
+        display: grid;
+        grid-template-columns: 1fr 120px;
+        gap: 10px;
+        align-items: end;
+      }
+      .codeActions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .help {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
       @media (max-width: 920px) {
         .grid {
           grid-template-columns: 1fr;
@@ -618,6 +753,9 @@ function Style() {
       }
       @media (max-width: 520px) {
         .grid2 {
+          grid-template-columns: 1fr;
+        }
+        .codeRow {
           grid-template-columns: 1fr;
         }
       }

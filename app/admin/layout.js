@@ -25,7 +25,10 @@ const MENU = [
   },
   {
     grupo: "Relatórios",
-    itens: [{ label: "Produção por Item", href: "/admin/relatorios/producao" }],
+    itens: [
+      { label: "Produção por Item", href: "/admin/relatorios/producao" },
+      { label: "Resultado Campanha", href: "/admin/relatorios/" },
+   ],
   },
   {
     grupo: "Atalhos",
